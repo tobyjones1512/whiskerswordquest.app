@@ -1,0 +1,20 @@
+{
+  "applinks": {
+    "details": [
+      {
+        "appIDs": [
+          "3KXHDYVY73.com.tobyjones.GrammarApp"
+        ],
+        "components": [
+          {
+            "/": "/play",
+            "comment": "Task links made at /education/create/"
+          },
+          {
+            "/": "/play/*"
+          }
+        ]
+      }
+    ]
+  }
+}

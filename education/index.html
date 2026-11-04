@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>For Education · Whiskers' Word Quest</title>
+<meta name="description" content="Classroom mode for iPad, class settings by QR code, and tasks you build for your class: spelling tests, phonics sounds, sorting games and more.">
+<meta name="theme-color" content="#6FCBFF">
+<link rel="icon" href="/img/favicon.png">
+<link rel="apple-touch-icon" href="/img/apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Nunito:wght@700;800;900&display=swap">
+<link rel="stylesheet" href="/css/site.css">
+<style>
+  .game-row { display: grid; grid-template-columns: 84px 1fr; gap: 18px; align-items: start; }
+  .game-row .badge { width: 84px; height: 84px; border-radius: 22px; display: grid; place-items: center; color: #fff; font-weight: 900; font-size: 24px; line-height: .95; white-space: pre-line; text-align: center; box-shadow: 0 5px 0 rgba(0,0,0,.18); text-shadow: 0 2px 0 rgba(0,0,0,.2); }
+  .game-row h3 { margin-bottom: 2px; }
+  .game-row .kind { font-size: 13px; text-transform: uppercase; letter-spacing: 1px; color: var(--soft); }
+  .game-row dl { margin: 10px 0 0; display: grid; gap: 8px; }
+  .game-row dt { font-weight: 900; }
+  .game-row dd { margin: 0; color: var(--soft); }
+  @media (max-width: 520px) { .game-row { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div class="sky" aria-hidden="true"><div class="cloud"><span></span></div><div class="cloud"><span></span></div><div class="cloud"><span></span></div><div class="cloud"><span></span></div></div>
+
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="/"><img src="/img/icon.png" alt=""><span>Whiskers' Word Quest</span></a>
+    <nav class="nav" aria-label="Main">
+      <a href="/">Home</a>
+      <a href="/education/" aria-current="page">For Education</a>
+      <a href="/education/create/">Create a Task</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <section class="center">
+    <div class="wrap">
+      <h1 class="title-l outlined sunny">For Education</h1>
+      <p class="lead">Use Whiskers' Word Quest with a whole class. Set up shared iPads in seconds, then send tasks that open straight into the right game with your words, sounds and settings.</p>
+      <div class="btns" style="margin-top:22px">
+        <a class="btn mint" href="/education/create/">Create a Task</a>
+        <a class="btn white" href="#games">Games and benefits</a>
+      </div>
+      <p style="margin-top:22px"><span class="pill beta"><span class="dot"></span> Beta on TestFlight soon · iPhone, iPhone Duo and iPad · iOS 17 and newer</span></p>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <h2 class="center" style="margin-bottom:34px">Tasks in three steps</h2>
+      <div class="steps">
+        <div class="card">
+          <h3>Build it</h3>
+          <p class="muted">Choose a game, a year group and the English your class uses. Add spellings, phonics sounds, word groups or pairs.</p>
+        </div>
+        <div class="card">
+          <h3>Share it</h3>
+          <p class="muted">You get a link, a QR code image and a printable PDF. Put the QR code on the board, a worksheet or your class page.</p>
+        </div>
+        <div class="card">
+          <h3>Play it</h3>
+          <p class="muted">Children scan the code with the Camera app, or with Scan class QR code on the classroom home screen. The game opens with your task.</p>
+        </div>
+      </div>
+      <p class="center small muted" style="margin-top:18px">Tasks change nothing on the device. When the child goes back to the home screen, the app returns to its usual settings.</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap grid two">
+      <div class="card">
+        <h3>Classroom mode (iPad)</h3>
+        <ul class="ticks">
+          <li>Everyone plays as one class: no names, profiles or accounts</li>
+          <li>No streaks, Game Center, background music or break reminders</li>
+          <li>Choose focus sounds, a spelling list and the game the iPad opens into</li>
+          <li>Turn it on in Grown-ups › For Educators</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Set up every iPad at once</h3>
+        <ul class="ticks">
+          <li>Set up one iPad, then tap Share settings as a QR code</li>
+          <li>On each other iPad, scan the code and tap Use settings</li>
+          <li>Year group, English, focus sounds, spellings and games all copy across</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Spelling tests your way</h3>
+        <ul class="ticks">
+          <li>Type or paste this week's spellings, up to 60 words</li>
+          <li><strong>Restricted keyboard:</strong> the letters in the word plus a few decoys, as tiles</li>
+          <li><strong>Whole keyboard:</strong> every letter laid out like a computer keyboard, so the tiles give nothing away</li>
+          <li>Choose spell-it questions, pick-the-spelling questions, or both</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Supports your English</h3>
+        <p class="muted" style="margin-bottom:12px">Spellings, vocabulary, year group names and the reading voice follow the English you pick.</p>
+        <div class="flags" id="flags" style="justify-content:flex-start"></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="games">
+    <div class="narrow">
+      <h2 class="center">Games and their benefits</h2>
+      <p class="lead center" style="margin-bottom:28px">Every activity can be sent as a task. This is what each one practises and why it helps.</p>
+      <div class="grid" id="list"></div>
+      <div class="center" style="margin-top:30px"><a class="btn mint" href="/education/create/">Create a Task</a></div>
+    </div>
+  </section>
+</main>
+
+<div class="hills" aria-hidden="true"><svg viewBox="0 0 1440 160" preserveAspectRatio="none"><path fill="#8EE08A" d="M0 70C300 0 520 10 760 60s480 60 680-20v120H0z"/><path fill="#5CCB78" d="M0 120c240-50 520-60 820-10s460 20 620-10v60H0z"/></svg></div>
+<footer>
+  <div class="wrap">
+    <span>© 2026 Whiskers' Word Quest</span>
+    <span><a href="/">Home</a> · <a href="/education/create/">Create a Task</a></span>
+  </div>
+</footer>
+
+<script src="/js/wwq.js"></script>
+<script>
+  const list = document.getElementById("list");
+  for (const g of WWQ.games) {
+    const el = document.createElement("article");
+    el.className = "card game-row";
+    el.innerHTML = `<div class="badge"></div><div><div class="kind"></div><h3></h3><dl><dt>What it practises</dt><dd class="p"></dd><dt>Why it helps</dt><dd class="w"></dd></dl><p style="margin:14px 0 0"><a class="btn small white">Create this task</a></p></div>`;
+    el.querySelector(".badge").style.background = g.color;
+    el.querySelector(".badge").textContent = g.badge;
+    el.querySelector(".kind").textContent = g.kind === "Learn" ? "Learn topic" : "Game";
+    el.querySelector("h3").textContent = g.title;
+    el.querySelector(".p").textContent = g.practises;
+    el.querySelector(".w").textContent = g.why;
+    el.querySelector("a").href = "/education/create/?game=" + g.key;
+    list.append(el);
+  }
+  const flags = document.getElementById("flags");
+  for (const e of WWQ.englishes) {
+    const s = document.createElement("span");
+    s.textContent = `${e.flag} ${e.name}`;
+    flags.append(s);
+  }
+</script>
+</body>
+</html>

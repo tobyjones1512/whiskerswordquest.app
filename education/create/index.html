@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Create a Task · Whiskers' Word Quest</title>
+<meta name="description" content="Build a Whiskers' Word Quest task for your class: choose a game, add spellings, phonics sounds or word groups, then share it as a link, QR code image or PDF.">
+<meta name="theme-color" content="#6FCBFF">
+<link rel="icon" href="/img/favicon.png">
+<link rel="apple-touch-icon" href="/img/apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Nunito:wght@700;800;900&display=swap">
+<link rel="stylesheet" href="/css/site.css">
+<style>
+  .layout { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 24px; align-items: start; }
+  .layout > * { min-width: 0; }
+  .kb-demo { max-width: 100%; overflow: hidden; }
+  @media (max-width: 420px) { .kb-demo span { min-width: 18px; height: 26px; font-size: 11px; padding: 0 2px; } .kb-demo div { gap: 3px; } .card { padding: 16px; } }
+  .preview { position: sticky; top: 86px; }
+  @media (max-width: 960px) { .layout { grid-template-columns: 1fr; } .preview { position: static; } }
+
+  .step { margin-bottom: 22px; }
+  .step > h2 { font-size: 26px; display: flex; align-items: center; gap: 12px; }
+  .step > h2 .n { width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; background: var(--sunny); box-shadow: 0 4px 0 #D9A21A; font-size: 20px; flex: none; }
+
+  .pick { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+  .pick label { cursor: pointer; display: block; }
+  .pick input { position: absolute; opacity: 0; pointer-events: none; }
+  .pick .tile { padding: 14px 10px 12px; transition: transform .12s; }
+  .pick .tile .badge { width: 56px; height: 56px; font-size: 18px; border-radius: 16px; margin-bottom: 8px; }
+  .pick .tile h3 { font-size: 16px; }
+  .pick .tile p { font-size: 12.5px; }
+  .pick input:checked + .tile { outline: 5px solid var(--ink); outline-offset: 3px; transform: translateY(-2px); }
+  .pick input:focus-visible + .tile { outline: 5px solid var(--sky); outline-offset: 3px; }
+  .group-title { font-size: 14px; text-transform: uppercase; letter-spacing: 1px; color: var(--soft); margin: 4px 0 10px; }
+
+  .benefit { margin-top: 18px; border-left: 6px solid var(--c, var(--sky)); }
+  .benefit dl { margin: 0; display: grid; gap: 6px; }
+  .benefit dt { font-weight: 900; }
+  .benefit dd { margin: 0 0 6px; color: var(--soft); }
+
+  .opt { padding: 16px 0; border-top: 2px solid var(--line); }
+  .opt:first-child { border-top: 0; padding-top: 0; }
+  .opt > h3 { font-size: 19px; margin-bottom: 4px; }
+  .opt > p.muted { font-size: 15px; margin-bottom: 12px; }
+
+  .kb-demo { display: grid; gap: 5px; justify-items: center; margin-top: 10px; }
+  .kb-demo div { display: flex; gap: 4px; }
+  .kb-demo span, .tiles-demo span { display: grid; place-items: center; min-width: 24px; height: 30px; padding: 0 4px; border-radius: 7px; background: var(--sunny); box-shadow: 0 3px 0 #C99A1C; font-weight: 900; font-size: 13px; }
+  .tiles-demo { display: flex; gap: 5px; flex-wrap: wrap; justify-content: center; margin-top: 10px; }
+  .kbd-choices { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .kbd-choices label { cursor: pointer; display: block; padding: 14px; border-radius: 20px; background: #fff; border: 3px solid rgba(31, 42, 68, .15); text-align: center; }
+  .kbd-choices input { position: absolute; opacity: 0; pointer-events: none; }
+  .kbd-choices label:has(input:checked) { border-color: var(--ink); box-shadow: 0 5px 0 var(--ink); }
+  .kbd-choices label:has(input:focus-visible) { outline: 4px solid var(--sky); outline-offset: 2px; }
+  .kbd-choices strong { display: block; font-size: 17px; }
+  .kbd-choices small { display: block; color: var(--soft); font-size: 13.5px; margin-top: 2px; }
+  @media (max-width: 560px) { .kbd-choices { grid-template-columns: 1fr; } }
+
+  .setlist { display: grid; gap: 8px; max-height: 360px; overflow: auto; padding: 4px; }
+  .setlist label { display: flex; gap: 12px; align-items: flex-start; cursor: pointer; padding: 10px 12px; border-radius: 16px; background: #fff; border: 2.5px solid rgba(31, 42, 68, .12); font-weight: 800; }
+  .setlist label:has(input:checked) { border-color: var(--mint); background: #effcf5; }
+  .setlist input { width: 22px; height: 22px; margin: 2px 0 0; accent-color: var(--mint); flex: none; }
+  .setlist small { display: block; color: var(--soft); font-weight: 700; font-size: 13.5px; }
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  @media (max-width: 560px) { .two-col { grid-template-columns: 1fr; } }
+
+  .preview .card { padding: 18px; }
+  .qr-box { background: #fff; border-radius: 22px; padding: 14px; border: 2.5px solid var(--line); display: grid; place-items: center; }
+  .qr-box canvas { width: 100%; max-width: 300px; height: auto; image-rendering: pixelated; }
+  .summary { margin: 14px 0 0; display: grid; gap: 6px; font-size: 14.5px; }
+  .summary div { display: grid; grid-template-columns: 110px 1fr; gap: 8px; }
+  .summary dt { font-weight: 900; }
+  .summary dd { margin: 0; color: var(--soft); overflow-wrap: anywhere; }
+  .linkrow { display: flex; gap: 8px; margin-top: 14px; }
+  .linkrow input { font-size: 13px; padding: 10px 12px; }
+  .preview .btns { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 14px; }
+  .preview .btns .btn { width: 100%; }
+  .game-chip { display: inline-flex; align-items: center; gap: 8px; color: #fff; border-radius: 999px; padding: 6px 14px; font-weight: 900; font-size: 15px; text-shadow: 0 1px 0 rgba(0,0,0,.2); }
+  #problems:empty { display: none; }
+</style>
+</head>
+<body>
+<div class="sky" aria-hidden="true"><div class="cloud"><span></span></div><div class="cloud"><span></span></div><div class="cloud"><span></span></div><div class="cloud"><span></span></div></div>
+
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="/"><img src="/img/icon.png" alt=""><span>Whiskers' Word Quest</span></a>
+    <nav class="nav" aria-label="Main">
+      <a href="/">Home</a>
+      <a href="/education/">For Education</a>
+      <a href="/education/create/" aria-current="page">Create a Task</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <section class="center" style="padding-bottom:12px">
+    <div class="wrap">
+      <h1 class="title-l outlined sunny">Create a Task</h1>
+      <p class="lead">Choose a game, set it up for your class, then share the link, QR code image or PDF. Scanning it opens Whiskers' Word Quest straight into your task.</p>
+    </div>
+  </section>
+
+  <section style="padding-top:12px">
+    <form class="wrap layout" id="form" autocomplete="off" onsubmit="return false">
+      <div>
+        <div class="card step">
+          <h2><span class="n">1</span>Choose an activity</h2>
+          <p class="group-title">Learn topics</p>
+          <div class="pick" id="pick-learn"></div>
+          <p class="group-title" style="margin-top:18px">Games</p>
+          <div class="pick" id="pick-games"></div>
+          <div class="card cream benefit" id="benefit"></div>
+        </div>
+
+        <div class="card step">
+          <h2><span class="n">2</span>Who it's for</h2>
+          <div class="field">
+            <label for="title">Task name <span class="muted">(optional)</span></label>
+            <input type="text" id="title" maxlength="60" placeholder="e.g. Week 5 spellings, Class 3B">
+          </div>
+          <div class="field">
+            <label for="english">English</label>
+            <select id="english"></select>
+            <span class="hint">Sets spellings, words, the year group names and the reading voice.</span>
+          </div>
+          <div class="field" id="year-field">
+            <span><label>Year group</label></span>
+            <div class="seg" id="year" role="radiogroup" aria-label="Year group"></div>
+          </div>
+          <div class="field" style="margin-bottom:0">
+            <span><label>Read questions aloud</label></span>
+            <div class="seg" role="radiogroup" aria-label="Read questions aloud">
+              <label><input type="radio" name="voice" value="" checked>Use the device setting</label>
+              <label><input type="radio" name="voice" value="1">Always</label>
+              <label><input type="radio" name="voice" value="0">Never</label>
+            </div>
+          </div>
+        </div>
+
+        <div class="card step">
+          <h2><span class="n">3</span>Customise</h2>
+
+          <div class="opt" data-opt="words">
+            <h3>Spelling words</h3>
+            <p class="muted">Type or paste your list, separated by spaces, commas or new lines. Up to 60 words, 2 to 20 letters each. Leave empty to use the app's own words for the year group.</p>
+            <textarea id="words" placeholder="because, friend, said, people, could, would"></textarea>
+            <p class="small muted" id="words-count" style="margin:8px 0 0"></p>
+          </div>
+
+          <div class="opt" data-opt="style">
+            <h3>Question type</h3>
+            <div class="seg" role="radiogroup" aria-label="Question type">
+              <label><input type="radio" name="style" value="" checked>Both</label>
+              <label><input type="radio" name="style" value="spell">Spell the word</label>
+              <label><input type="radio" name="style" value="pick">Pick the right spelling</label>
+            </div>
+          </div>
+
+          <div class="opt" data-opt="keyboard">
+            <h3>Keyboard</h3>
+            <p class="muted">How children type the word when they spell it.</p>
+            <div class="kbd-choices">
+              <label><input type="radio" name="kb" value="" checked>
+                <strong>Restricted keyboard</strong><small>The letters in the word plus a few decoys, as tiles. Gentler, good for younger children.</small>
+                <div class="tiles-demo" aria-hidden="true"><span>S</span><span>D</span><span>A</span><span>I</span><span>Q</span><span>E</span></div>
+              </label>
+              <label><input type="radio" name="kb" value="keys">
+                <strong>Whole keyboard</strong><small>Every letter, laid out like a computer keyboard. The letters give nothing away, like a real test.</small>
+                <div class="kb-demo" aria-hidden="true"><div><span>Q</span><span>W</span><span>E</span><span>R</span><span>T</span><span>Y</span><span>U</span><span>I</span><span>O</span><span>P</span></div><div><span>A</span><span>S</span><span>D</span><span>F</span><span>G</span><span>H</span><span>J</span><span>K</span><span>L</span></div><div><span>Z</span><span>X</span><span>C</span><span>V</span><span>B</span><span>N</span><span>M</span><span>⌫</span></div></div>
+              </label>
+            </div>
+          </div>
+
+          <div class="opt" data-opt="focus">
+            <h3>Focus sounds</h3>
+            <p class="muted">Questions that use these sounds come first. Leave all off for the whole year group's content.</p>
+            <div id="focus"></div>
+          </div>
+
+          <div class="opt" data-opt="sounds">
+            <h3>Sounds to blend</h3>
+            <p class="muted">Pick the sounds to practise. Words that use them are chosen for the round (at least 3 are needed). Leave all off for a mix.</p>
+            <div class="chips" id="sounds"></div>
+            <p class="small muted" id="sounds-words" style="margin:10px 0 0"></p>
+          </div>
+
+          <div class="opt" data-opt="sets">
+            <h3>Word sets</h3>
+            <p class="muted">Each round uses one of the sets you tick. Leave all off to use the year group's usual sets.</p>
+            <div class="seg" style="margin-bottom:12px" role="radiogroup" aria-label="Which sets">
+              <label><input type="radio" name="setsrc" value="built" checked>Choose from the app</label>
+              <label><input type="radio" name="setsrc" value="own">Make my own groups</label>
+            </div>
+            <div id="sets-built">
+              <label class="toggle" style="border:0;padding-top:0"><span class="small">Show sets for every year group</span><span class="switch"><input type="checkbox" id="sets-all"><span></span></span></label>
+              <div class="setlist" id="sets"></div>
+            </div>
+            <div id="sets-own" class="two-col hidden">
+              <div>
+                <div class="field"><label for="ga">First group</label><input type="text" id="ga" maxlength="30" placeholder="e.g. Nouns"></div>
+                <div class="field"><label for="gaw">Words</label><textarea id="gaw" placeholder="3 to 12 words or short phrases, one per line"></textarea></div>
+              </div>
+              <div>
+                <div class="field"><label for="gb">Second group</label><input type="text" id="gb" maxlength="30" placeholder="e.g. Verbs"></div>
+                <div class="field"><label for="gbw">Words</label><textarea id="gbw" placeholder="3 to 12 words or short phrases, one per line"></textarea></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="opt" data-opt="pairs">
+            <h3>Pairs</h3>
+            <div class="seg" style="margin-bottom:12px" role="radiogroup" aria-label="Which pairs">
+              <label><input type="radio" name="pairsrc" value="built" checked>Choose from the app</label>
+              <label><input type="radio" name="pairsrc" value="own">Make my own pairs</label>
+            </div>
+            <div id="pairs-built">
+              <label class="toggle" style="border:0;padding-top:0"><span class="small">Show sets for every year group</span><span class="switch"><input type="checkbox" id="pairs-all"><span></span></span></label>
+              <div class="setlist" id="pairsets"></div>
+            </div>
+            <div id="pairs-own" class="hidden">
+              <div class="field"><label for="ownpairs">Your pairs</label>
+                <textarea id="ownpairs" placeholder="One pair per line, joined with =&#10;hot = cold&#10;big = small&#10;happy = sad"></textarea>
+                <span class="hint">3 to 8 pairs. Up to 6 are used in each round.</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="opt" data-opt="count">
+            <h3>Questions in the round</h3>
+            <div class="seg" id="count" role="radiogroup" aria-label="Questions in the round"></div>
+          </div>
+
+          <div class="opt" data-opt="hints">
+            <label class="toggle" style="border:0;padding:0"><span><strong>Allow hints</strong><br><span class="small muted">The Hint button crosses out a wrong answer.</span></span><span class="switch"><input type="checkbox" id="hints" checked><span></span></span></label>
+          </div>
+
+          <p class="muted" id="no-opts" style="margin:0">This activity has no extra options. Choose the year group and English above.</p>
+        </div>
+      </div>
+
+      <aside class="preview" aria-label="Your task">
+        <div class="card">
+          <h2 style="font-size:24px;margin-bottom:10px"><span class="n" style="display:none"></span>Your task</h2>
+          <p style="margin:0 0 6px"><span class="game-chip" id="chip"></span></p>
+          <h3 id="pv-title" style="margin:8px 0 12px"></h3>
+          <div id="problems"></div>
+          <div class="qr-box"><canvas id="qr" width="300" height="300" aria-label="QR code for this task" role="img"></canvas></div>
+          <dl class="summary" id="summary"></dl>
+          <div class="linkrow">
+            <label class="sr" for="link">Task link</label>
+            <input type="text" id="link" readonly>
+            <button class="btn small white" type="button" id="copy">Copy</button>
+          </div>
+          <div class="btns">
+            <button class="btn small mint" type="button" id="png">Image</button>
+            <button class="btn small coral" type="button" id="pdf">PDF</button>
+            <button class="btn small grape" type="button" id="share">Share</button>
+            <a class="btn small sky" id="open" href="#">Open</a>
+          </div>
+          <p class="small muted" style="margin:12px 0 0">Scan with the Camera app on iPhone or iPad, or with Scan class QR code on a classroom iPad. Open plays the task on this device if the app is installed.</p>
+        </div>
+      </aside>
+    </form>
+  </section>
+</main>
+
+<div class="hills" aria-hidden="true"><svg viewBox="0 0 1440 160" preserveAspectRatio="none"><path fill="#8EE08A" d="M0 70C300 0 520 10 760 60s480 60 680-20v120H0z"/><path fill="#5CCB78" d="M0 120c240-50 520-60 820-10s460 20 620-10v60H0z"/></svg></div>
+<footer>
+  <div class="wrap">
+    <span>© 2026 Whiskers' Word Quest · Beta on TestFlight soon · iPhone, iPhone Duo and iPad (iOS 17 and newer)</span>
+    <span><a href="/">Home</a> · <a href="/education/">For Education</a></span>
+  </div>
+</footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="/js/data.js"></script>
+<script src="/js/wwq.js"></script>
+<script src="/js/qr.js"></script>
+<script src="/js/create.js"></script>
+</body>
+</html>
