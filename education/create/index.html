@@ -83,7 +83,8 @@
   body.parent .teacher-only, body.parent header.top, body.parent footer, body.parent .hills { display: none; }
   body:not(.parent) .parent-only { display: none; }
   .drafts { margin-top: 18px; }
-  .drafts .btns { grid-template-columns: 1fr 1fr 1fr; }
+  .preview .drafts .btns { grid-template-columns: 1fr 1fr; }
+  .drafts #draft-open { grid-column: 1 / -1; }
   .draft-row { display: flex; gap: 8px; align-items: center; padding: 8px 0; border-top: 2px solid var(--line); font-size: 14.5px; }
   .draft-row span { flex: 1; min-width: 0; overflow-wrap: anywhere; font-weight: 800; }
   .draft-row small { display: block; color: var(--soft); font-weight: 700; }
@@ -278,7 +279,7 @@
             <button class="btn small mint" type="button" id="png">Image</button>
             <button class="btn small coral" type="button" id="pdf">PDF</button>
             <button class="btn small grape" type="button" id="share">Share</button>
-            <a class="btn small sky" id="open" href="#">Open</a>
+            <a class="btn small" id="open" href="#">Open</a>
           </div>
           <p class="small muted" style="margin:12px 0 0">Scan with the Camera app on iPhone or iPad, or with Scan class QR code on a classroom iPad. Open plays the task on this device if the app is installed.</p>
           </div>
@@ -288,7 +289,7 @@
           <p class="small muted" style="margin:0 0 10px">Keep this task to finish later: in this browser, or as a file you can open here again from any device.</p>
           <div class="btns">
             <button class="btn small mint" type="button" id="draft-save">Save in browser</button>
-            <button class="btn small sky" type="button" id="draft-file">Save to file</button>
+            <button class="btn small" type="button" id="draft-file">Save to file</button>
             <button class="btn small white" type="button" id="draft-open">Open file</button>
           </div>
           <div id="draft-list" style="margin-top:10px"></div>
