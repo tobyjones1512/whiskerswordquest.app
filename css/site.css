@@ -195,6 +195,9 @@ p { margin: 0 0 1em; }
   display: flex; gap: 18px; overflow-x: auto; scroll-snap-type: x mandatory; scroll-behavior: smooth;
   padding: 8px 4px 18px; scroll-padding-inline: 4px;
   scrollbar-width: thin; scrollbar-color: rgba(31, 42, 68, .35) transparent;
+  /* shots that run off either edge fade out instead of being sliced */
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 28px, #000 calc(100% - 28px), transparent);
+  mask-image: linear-gradient(to right, transparent, #000 28px, #000 calc(100% - 28px), transparent);
 }
 .shots::-webkit-scrollbar { height: 8px; }
 .shots::-webkit-scrollbar-thumb { background: rgba(31, 42, 68, .3); border-radius: 8px; }

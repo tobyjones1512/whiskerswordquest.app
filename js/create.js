@@ -8,6 +8,14 @@
   const el = (html) => { const t = document.createElement("template"); t.innerHTML = html.trim(); return t.content.firstChild; };
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
+  // A grown-up opening this inside the app (?app=1): no class wording, and the task is saved to the app instead of shared.
+  const parent = new URLSearchParams(location.search).get("app") === "1";
+  if (parent) {
+    document.body.classList.add("parent");
+    $("lead").textContent = "Choose a game, set it up for your child, then save it to the app. It appears in My Tasks on their home screen.";
+    $("title").placeholder = "e.g. Week 5 spellings";
+  }
+
   // ---------- Build the controls ----------
   for (const g of games) {
     const box = $(g.kind === "Learn" ? "pick-learn" : "pick-games");
@@ -50,6 +58,20 @@
     const pick = opts.some(([v]) => v === cur) ? cur : (opts[0][0] === "all" ? "all" : "8");
     $("count").replaceChildren(...opts.map(([v, l]) => el(`<label><input type="radio" name="count" value="${v}" ${v === pick ? "checked" : ""}>${l}</label>`)));
   }
+
+  // What each game accepts as "your own content". The app reads the same line formats (Custom.swift).
+  const own = {
+    sounds: { hint: "Words with - between each sound, separated by commas or new lines. At least 3 words.", ph: "c-a-t, sh-i-p, r-ai-n", min: 3,
+      count: (ls) => ls.flatMap((l) => l.split(",")).filter((w) => w.split("-").filter((p) => p.trim()).length >= 2).length },
+    tenses: { hint: "One verb per line: now = before. At least 3 verbs.", ph: "walk = walked\nrun = ran\nswim = swam", min: 3,
+      count: (ls) => ls.filter((l) => l.split("=").map((s) => s.trim()).filter(Boolean).length === 2).length },
+    homophones: { hint: "A sentence with ___, then | the right word, then | the wrong one. At least 3 lines.", ph: "We swim in the ___. | sea | see", min: 3,
+      count: (ls) => ls.filter((l) => l.split("|").map((s) => s.trim()).filter(Boolean).length >= 3 && l.split("|")[0].includes("___")).length },
+    sentences: { hint: "One sentence per line. At least 3 sentences.", ph: "The cat sat on the mat.\nWe went to the park.", min: 3, count: (ls) => ls.length },
+    phonics: { hint: "A sound, a colon, then words that have it. Use two or more lines.", ph: "ai: rain, train, paint\nee: feet, tree, green", min: 3,
+      count: (ls) => { const g = ls.map((l) => l.split(":")[1] || "").map((s) => s.split(",").map((w) => w.trim()).filter(Boolean)); return g.length >= 2 ? g.reduce((n, w) => n + w.length, 0) : 0; } },
+  };
+  own.tilt = { ...own.homophones, hint: "Same as Sound-Alikes: a sentence with ___, then | right | wrong. At least 3 lines." };
 
   // ---------- Read the form ----------
   function lines(id) { return $(id).value.split(/\n|,/).map((s) => s.trim()).filter(Boolean); }
@@ -99,6 +121,13 @@
         if (s.length) t.s = s;
       }
     }
+    if (has("own") && own[key]) {
+      const ls = $("owntext").value.split("\n").map((s) => s.trim()).filter(Boolean).slice(0, 40).map((s) => s.slice(0, 120));
+      if (ls.length) {
+        if (own[key].count(ls) < own[key].min) problems.push(`Your own content needs at least ${own[key].min} valid items. Check the format shown under the box.`);
+        else { t.x = ls; delete t.f; }
+      }
+    }
     if (has("count")) {
       const c = radio("count");
       if (c === "all") t.n = Math.min(30, Math.max(3, words.length * (t.q ? 1 : 2)));
@@ -124,6 +153,7 @@
       form.querySelector('[data-opt="keyboard"]').classList.toggle("hidden", radio("style") === "pick");
       form.querySelector('[data-opt="focus"]').classList.toggle("hidden", words.length > 0);
     }
+    if (own[key]) { $("owntext").placeholder = own[key].ph; $("own-hint").textContent = own[key].hint; }
     $("no-opts").classList.toggle("hidden", g.opts.some((o) => o !== "voice"));
     $("year-field").classList.toggle("hidden", key === "sounds");
     $("sets-built").classList.toggle("hidden", radio("setsrc") === "own");
@@ -146,7 +176,9 @@
     $("pv-title").textContent = t.t || "Untitled task";
     $("summary").replaceChildren(...describe(t).lines.map(([k, v]) => el(`<div><dt>${esc(k)}</dt><dd>${esc(v)}</dd></div>`)));
     $("problems").innerHTML = problems.map((p) => `<p class="notice bad" style="margin:0 0 10px">${esc(p)}</p>`).join("");
+    $("save-app").href = "whiskerswordquest://save#" + encode(t);
     const blocked = problems.some((p) => !p.startsWith("The app plays"));
+    $("save-app").classList.toggle("hidden", blocked);
     for (const id of ["png", "pdf", "share", "copy"]) $(id).disabled = blocked;
     $("open").classList.toggle("hidden", blocked);
   }
@@ -195,6 +227,69 @@
     const b = $("copy"); b.textContent = "Copied!"; setTimeout(() => (b.textContent = "Copy"), 1600);
   }
   $("copy").onclick = copy;
+
+  // ---------- Drafts: save the whole form to this browser or a file, and open it again later ----------
+  const snapshot = () => {
+    const s = { radios: {}, checks: {}, groups: {}, fields: {} };
+    for (const i of form.elements) {
+      const k = i.id || i.name;
+      if (!k || i.id === "link" || ["button", "submit", "file"].includes(i.type)) continue;
+      if (i.type === "radio") { if (i.checked) s.radios[i.name] = i.value; }
+      else if (i.type === "checkbox") { if (i.name) { (s.groups[i.name] ||= []); if (i.checked) s.groups[i.name].push(i.value); } else s.checks[i.id] = i.checked; }
+      else s.fields[i.id] = i.value;
+    }
+    return s;
+  };
+  const tick = (name, value) => { const i = form.querySelector(`input[name="${name}"][value="${CSS.escape(value)}"]`); if (i) i.checked = true; };
+  function restore(s) {
+    tick("game", s.radios.game);
+    $("english").value = s.fields.english; renderYears();
+    if (s.radios.year) tick("year", s.radios.year);
+    $("sets-all").checked = $("pairs-all").checked = true; renderSets();   // so every saved set is listed to tick
+    for (const n of ["set", "pairset"]) for (const v of s.groups[n] || []) tick(n, v);
+    for (const [id, on] of Object.entries(s.checks)) $(id).checked = on;
+    renderSets();
+    for (const [id, v] of Object.entries(s.fields)) if ($(id) && id !== "english") $(id).value = v;
+    for (const [n, v] of Object.entries(s.radios)) if (!["game", "year", "count"].includes(n)) tick(n, v);
+    for (const n of ["focus", "sound"]) { for (const i of form.querySelectorAll(`input[name="${n}"]`)) i.checked = (s.groups[n] || []).includes(i.value); }
+    update();
+    if (s.radios.count) { tick("count", s.radios.count); update(); }
+  }
+  const draftName = () => $("title").value.trim() || games.find((g) => g.key === (radio("game") || "spelling")).title;
+  const stored = () => { try { return JSON.parse(localStorage.getItem("wwq.drafts") || "[]"); } catch { return []; } };
+  function listDrafts() {
+    const ds = stored();
+    $("draft-list").replaceChildren(...ds.map((d, i) => {
+      const row = el(`<div class="draft-row"><span>${esc(d.name)}<small>${esc(new Date(d.saved).toLocaleString())}</small></span><button type="button" class="btn small white">Open</button><button type="button" class="btn small coral">Delete</button></div>`);
+      const [open, del] = row.querySelectorAll("button");
+      open.onclick = () => restore(d.state);
+      del.onclick = () => { ds.splice(i, 1); localStorage.setItem("wwq.drafts", JSON.stringify(ds)); listDrafts(); };
+      return row;
+    }));
+  }
+  $("draft-save").onclick = () => {
+    const ds = stored(), name = draftName(), d = { name, saved: Date.now(), state: snapshot() };
+    const at = ds.findIndex((x) => x.name === name);
+    if (at >= 0) ds[at] = d; else ds.unshift(d);
+    try { localStorage.setItem("wwq.drafts", JSON.stringify(ds.slice(0, 30))); } catch { alert("This browser would not save the draft. Use Save to file instead."); }
+    listDrafts();
+    const b = $("draft-save"); b.textContent = "Saved!"; setTimeout(() => (b.textContent = "Save in browser"), 1600);
+  };
+  $("draft-file").onclick = () => {
+    const name = draftName();
+    save(new Blob([JSON.stringify({ wwq: 1, name, saved: Date.now(), state: snapshot() })], { type: "application/json" }), name.replace(/[^\w\- ]+/g, "").trim().replace(/\s+/g, "-") + ".wwq.json");
+  };
+  $("draft-open").onclick = () => $("draft-input").click();
+  $("draft-input").onchange = async (e) => {
+    const f = e.target.files[0]; e.target.value = "";
+    if (!f) return;
+    try {
+      const d = JSON.parse(await f.text());
+      if (d.wwq !== 1 || !games.some((g) => g.key === d.state.radios.game)) throw 0;
+      restore(d.state);
+    } catch { alert("That file is not a Whiskers' Word Quest task."); }
+  };
+  listDrafts();
 
   // ---------- Start ----------
   const params = new URLSearchParams(location.search);
