@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Open your task · Whiskers' Word Quest</title>
+<meta name="robots" content="noindex">
+<meta name="theme-color" content="#6FCBFF">
+<link rel="icon" href="/img/favicon.png">
+<link rel="apple-touch-icon" href="/img/apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Nunito:wght@700;800;900&display=swap">
+<link rel="stylesheet" href="/css/site.css">
+<style>
+  .summary { margin: 16px 0 0; display: grid; gap: 8px; text-align: left; }
+  .summary div { display: grid; grid-template-columns: 150px 1fr; gap: 10px; }
+  .summary dt { font-weight: 900; }
+  .summary dd { margin: 0; color: var(--soft); overflow-wrap: anywhere; }
+  @media (max-width: 520px) { .summary div { grid-template-columns: 1fr; gap: 0; } }
+  .game-chip { display: inline-flex; color: #fff; border-radius: 999px; padding: 8px 18px; font-weight: 900; text-shadow: 0 1px 0 rgba(0,0,0,.2); }
+  .qr-box { background: #fff; border-radius: 22px; padding: 12px; border: 2.5px solid var(--line); display: inline-block; margin-top: 8px; }
+  .qr-box canvas { width: 240px; height: 240px; image-rendering: pixelated; }
+</style>
+</head>
+<body>
+<div class="sky" aria-hidden="true"><div class="cloud"><span></span></div><div class="cloud"><span></span></div><div class="cloud"><span></span></div><div class="cloud"><span></span></div></div>
+
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="/"><img src="/img/icon.png" alt=""><span>Whiskers' Word Quest</span></a>
+    <nav class="nav" aria-label="Main">
+      <a href="/">Home</a>
+      <a href="/education/">For Education</a>
+      <a href="/education/create/">Create a Task</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <section class="center">
+    <div class="narrow">
+      <div class="says" style="justify-content:center;margin-bottom:24px">
+        <img src="/img/icon.png" alt="Whiskers the cat">
+        <p class="bubble" id="say" style="margin-bottom:0;text-align:left">Your teacher made a task for you!</p>
+      </div>
+
+      <div class="card" id="task">
+        <p style="margin:0"><span class="game-chip" id="chip"></span></p>
+        <h1 id="title" style="font-size:clamp(28px,5vw,40px);margin:14px 0 4px"></h1>
+        <dl class="summary" id="summary"></dl>
+        <div class="btns" style="justify-content:center;margin-top:22px">
+          <a class="btn mint" id="open" href="#">Open in Whiskers' Word Quest</a>
+        </div>
+        <p class="small muted" style="margin:6px 0 0">Nothing happens? The app may not be installed on this device yet. It's coming to TestFlight soon for iPhone, iPhone Duo and iPad (iOS 17 and newer).</p>
+        <div id="desk" class="hidden">
+          <p style="margin:20px 0 0"><strong>On a computer?</strong> Scan this with an iPhone or iPad.</p>
+          <div class="qr-box"><canvas id="qr" aria-label="QR code for this task" role="img"></canvas></div>
+        </div>
+      </div>
+
+      <div class="card hidden" id="bad">
+        <h1 style="font-size:32px">This task link doesn't work</h1>
+        <p class="muted">It may have been cut short when it was copied. Ask your teacher for the QR code, or make a new task.</p>
+        <div class="btns" style="justify-content:center"><a class="btn grape" href="/education/create/">Create a Task</a></div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<div class="hills" aria-hidden="true"><svg viewBox="0 0 1440 160" preserveAspectRatio="none"><path fill="#8EE08A" d="M0 70C300 0 520 10 760 60s480 60 680-20v120H0z"/><path fill="#5CCB78" d="M0 120c240-50 520-60 820-10s460 20 620-10v60H0z"/></svg></div>
+<footer>
+  <div class="wrap">
+    <span>© 2026 Whiskers' Word Quest</span>
+    <span><a href="/">Home</a> · <a href="/education/">For Education</a></span>
+  </div>
+</footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>
+<script src="/js/data.js"></script>
+<script src="/js/wwq.js"></script>
+<script src="/js/qr.js"></script>
+<script>
+  // If the app is installed, iOS opens task links in the app and this page is never seen.
+  // Here we explain the task and offer the app's own URL scheme as a second way in.
+  const payload = location.hash.slice(1);
+  const task = payload && WWQ.decode(payload);
+  const $ = (id) => document.getElementById(id);
+  if (!task) {
+    $("task").classList.add("hidden"); $("bad").classList.remove("hidden");
+    $("say").textContent = "Hmm, I can't read that task.";
+  } else {
+    const info = WWQ.describe(task);
+    $("chip").textContent = info.game.title;
+    $("chip").style.background = info.game.color;
+    $("title").textContent = task.t || info.game.title;
+    for (const [k, v] of info.lines) {
+      const d = document.createElement("div");
+      d.innerHTML = "<dt></dt><dd></dd>";
+      d.firstChild.textContent = k; d.lastChild.textContent = v;
+      $("summary").append(d);
+    }
+    $("open").href = "whiskerswordquest://play#" + payload;
+    const touch = matchMedia("(pointer: coarse)").matches;
+    if (!touch && window.qrcode) { $("desk").classList.remove("hidden"); WWQQR.draw($("qr"), location.href, 480); }
+  }
+</script>
+</body>
+</html>
