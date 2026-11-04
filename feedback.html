@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Feedback · Whiskers' Word Quest</title>
+<meta name="description" content="Report a bug or suggest a feature for Whiskers' Word Quest.">
+<meta name="theme-color" content="#6FCBFF">
+<link rel="icon" href="/img/favicon.png">
+<link rel="apple-touch-icon" href="/img/apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Nunito:wght@700;800;900&display=swap">
+<link rel="stylesheet" href="/css/site.css">
+<style>.hp{position:absolute;left:-9999px}#msg{font-weight:800;margin:14px 0 0}#msg.err{color:#c62828}</style>
+</head>
+<body>
+<div class="sky" aria-hidden="true"><div class="cloud"><span></span></div><div class="cloud"><span></span></div><div class="cloud"><span></span></div><div class="cloud"><span></span></div></div>
+
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="/"><img src="/img/icon.png" alt=""><span>Whiskers' Word Quest</span></a>
+    <nav class="nav" aria-label="Main">
+      <a href="/">Home</a>
+      <a href="/education/">For Education</a>
+      <a href="/education/create/">Create a Task</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <section class="center" style="padding-bottom:12px"><div class="wrap"><h1 class="title-l outlined sunny">Feedback</h1></div></section>
+  <section style="padding-top:12px"><div class="wrap"><div class="card" style="max-width:820px;margin:0 auto">
+    <form id="f" novalidate>
+      <div class="field">
+        <label for="type">Type</label>
+        <select id="type"><option value="bug">Bug Report</option><option value="feature">Feature Suggestion</option><option value="other">Something Else</option></select>
+      </div>
+      <div class="field">
+        <label for="title">Title</label>
+        <input type="text" id="title" maxlength="100" autocomplete="off">
+        <span class="hint">Title must be 10 to 100 characters. Your feedback is posted publicly at <a href="https://thecaffeinemediacompany.fider.io">thecaffeinemediacompany.fider.io</a>.</span>
+      </div>
+      <div class="field">
+        <label for="desc">Description</label>
+        <textarea id="desc" maxlength="5000"></textarea>
+      </div>
+      <input class="hp" type="text" id="website" tabindex="-1" autocomplete="off" aria-hidden="true">
+      <div class="btns">
+        <button class="btn mint" id="send" type="submit" disabled>Send feedback</button>
+        <a class="btn white" href="https://thecaffeinemediacompany.fider.io">See other users' feedback</a>
+      </div>
+      <p id="msg" role="status"></p>
+    </form>
+  </div></div></section>
+</main>
+<div class="hills" aria-hidden="true"><svg viewBox="0 0 1440 160" preserveAspectRatio="none"><path fill="#8EE08A" d="M0 70C300 0 520 10 760 60s480 60 680-20v120H0z"/><path fill="#5CCB78" d="M0 120c240-50 520-60 820-10s460 20 620-10v60H0z"/></svg></div>
+<footer>
+  <div class="wrap">
+    <span>© 2026 Toby Jones T/A <a href="https://thecaffeinemediacompany.com">The Caffeine Media Company</a></span>
+    <span><a href="/">Home</a> · <a href="/education/">For Education</a> · <a href="/support.html">Support</a> · <a href="/feedback.html">Feedback</a> · <a href="/privacy.html">Privacy</a></span>
+    <span class="social" aria-label="Toby Jones on social media"><a href="https://x.com/tobyj1512" rel="me">X</a> · <a href="https://www.threads.com/@tobyjones1512" rel="me">Threads</a> · <a href="https://truthsocial.com/@tobyjones1512" rel="me">Truth Social</a> · <a href="https://www.linkedin.com/in/toby-r-jones" rel="me">LinkedIn</a></span>
+  </div>
+</footer>
+
+<script>
+  // The Fider key never reaches the browser: this posts to a small relay that holds it.
+  const API = "https://fider-feedback-api.vercel.app/api/feedback";
+  const $ = (id) => document.getElementById(id);
+  const ok = () => { const n = $("title").value.trim().length; return n >= 10 && n <= 100; };
+  $("title").addEventListener("input", () => { $("send").disabled = !ok(); });
+  $("f").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    if (!ok()) return;
+    const msg = $("msg"), btn = $("send");
+    btn.disabled = true; msg.className = ""; msg.textContent = "Sending…";
+    try {
+      const r = await fetch(API, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: $("type").value, title: $("title").value, description: $("desc").value, website: $("website").value }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || "Couldn't send feedback.");
+      $("f").reset();
+      msg.textContent = "Thanks for your feedback!";
+    } catch (err) {
+      msg.className = "err";
+      msg.textContent = err.message || "Couldn't send feedback.";
+      btn.disabled = !ok();
+    }
+  });
+</script>
+</body>
+</html>
