@@ -28,19 +28,19 @@
     { key: "phonics", kind: "Learn", title: "Phonics Fun / Word Patterns", sub: "Sounds, letters, prefixes and suffixes", badge: "ai", color: "#FF9F43",
       practises: "Phonics for younger years (digraphs, vowel sounds); prefixes and suffixes for older years.",
       why: "Short, repeated practice of one sound at a time builds automatic decoding. Pick focus sounds to match this week's phonics lesson.",
-      opts: ["focus", "count", "hints", "voice"] },
+      opts: ["own", "focus", "count", "hints", "voice"] },
     { key: "homophones", kind: "Learn", title: "Sound-Alikes", sub: "Words that sound the same", badge: "sea\nsee", color: "#FF6B6B",
       practises: "Homophones in context: there/their/they're, to/too/two, sea/see and many more.",
       why: "Each word is shown in a real sentence, so children choose by meaning rather than guessing. A tip after every answer explains the difference.",
-      opts: ["count", "hints", "voice"] },
+      opts: ["own", "count", "hints", "voice"] },
     { key: "tenses", kind: "Learn", title: "Time Travel", sub: "Past, present and verb forms", badge: "-ed", color: "#38B6FF",
       practises: "Past and present tense, regular -ed endings, irregular verbs and, for older years, perfect and progressive forms.",
       why: "Children see verbs inside sentences and decide when they happen, which builds the grammar awareness that writing assessments look for.",
-      opts: ["count", "hints", "voice"] },
+      opts: ["own", "count", "hints", "voice"] },
     { key: "sentences", kind: "Learn", title: "Sentence Maker", sub: "Put the words in order", badge: "A..", color: "#1FB8A8",
       practises: "Word order, capital letters and full stops by rebuilding jumbled sentences.",
       why: "Rebuilding sentences makes sentence structure visible and helps children who find it hard to get ideas down in the right order.",
-      opts: ["count", "voice"] },
+      opts: ["own", "count", "voice"] },
     { key: "mix", kind: "Learn", title: "Mix It Up!", sub: "A bit of everything", badge: "?!", color: "#2FCB8A",
       practises: "A mixed round of homophones, tenses, spelling, phonics and sentences.",
       why: "Mixed (interleaved) practice helps learning stick better than one topic at a time. Good for revision and starters.",
@@ -64,11 +64,11 @@
     { key: "sounds", kind: "Game", title: "Sound Buttons", sub: "Tap, sound out, blend!", badge: "s-a-t", color: "#FF7A59",
       practises: "Segmenting and blending: tap the sounds in a word in order, then blend them.",
       why: "Sound buttons are how many phonics schemes teach blending. The app says each pure sound, not the letter name.",
-      opts: ["sounds", "voice"] },
+      opts: ["sounds", "own", "voice"] },
     { key: "tilt", kind: "Game", title: "Tilt Roll", sub: "Tilt your device to roll", badge: "↻", color: "#00A896",
       practises: "Multiple-choice grammar and spelling questions, answered by tilting to roll a ball of wool.",
       why: "Physical, playful and good for fine motor control. Children can drag instead of tilting.",
-      opts: ["voice"] },
+      opts: ["own", "voice"] },
   ];
 
   // ---- Task link ----
@@ -112,6 +112,7 @@
     if (t.g === "spelling" && (!t.q || t.q === "spell")) lines.push(["Keyboard", t.k === "keys" ? "Whole keyboard" : "Restricted (letter tiles)"]);
     if (t.f && t.f.length) lines.push([t.g === "sounds" ? "Sounds" : "Focus sounds", t.f.join(", ")]);
     if (t.c) lines.push(["Groups", hide ? `${t.c.a} or ${t.c.b}` : `${t.c.a}: ${t.c.aw.join(", ")} / ${t.c.b}: ${t.c.bw.join(", ")}`]);
+    if (t.x) lines.push(["Own content", hide ? `${t.x.length} item${t.x.length === 1 ? "" : "s"}` : t.x.join(" / ")]);
     if (t.p) lines.push(["Pairs", hide ? `${t.p.length} pairs` : t.p.map((p) => p.join(" = ")).join(", ")]);
     if (t.s && t.s.length) lines.push(["Sets", t.s.map((id) => { const s = D.sorts[id]; const p = D.pairs[id]; return s ? `${s.title} (${s.a} / ${s.b})` : p ? p.title : id; }).join("; ")]);
     if (t.n) lines.push(["Questions in the round", String(t.n)]);

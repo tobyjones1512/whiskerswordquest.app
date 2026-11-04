@@ -80,6 +80,13 @@
   .preview .btns .btn { width: 100%; }
   .game-chip { display: inline-flex; align-items: center; gap: 8px; color: #fff; border-radius: 999px; padding: 6px 14px; font-weight: 900; font-size: 15px; text-shadow: 0 1px 0 rgba(0,0,0,.2); }
   #problems:empty { display: none; }
+  body.parent .teacher-only, body.parent header.top, body.parent footer, body.parent .hills { display: none; }
+  body:not(.parent) .parent-only { display: none; }
+  .drafts { margin-top: 18px; }
+  .drafts .btns { grid-template-columns: 1fr 1fr 1fr; }
+  .draft-row { display: flex; gap: 8px; align-items: center; padding: 8px 0; border-top: 2px solid var(--line); font-size: 14.5px; }
+  .draft-row span { flex: 1; min-width: 0; overflow-wrap: anywhere; font-weight: 800; }
+  .draft-row small { display: block; color: var(--soft); font-weight: 700; }
 </style>
 </head>
 <body>
@@ -100,7 +107,7 @@
   <section class="center" style="padding-bottom:12px">
     <div class="wrap">
       <h1 class="title-l outlined sunny">Create a Task</h1>
-      <p class="lead">Choose a game, set it up for your class, then share the link, QR code image or PDF. Scanning it opens Whiskers' Word Quest straight into your task.</p>
+      <p class="lead" id="lead">Choose a game, set it up for your class, then share the link, QR code image or PDF. Scanning it opens Whiskers' Word Quest straight into your task.</p>
     </div>
   </section>
 
@@ -229,6 +236,13 @@
             </div>
           </div>
 
+          <div class="opt" data-opt="own">
+            <h3>Your own content <span class="muted">(optional)</span></h3>
+            <div class="field"><label for="owntext" id="own-label">Your own content</label>
+              <textarea id="owntext" rows="5"></textarea>
+              <span class="hint" id="own-hint"></span>
+            </div>
+          </div>
           <div class="opt" data-opt="count">
             <h3>Questions in the round</h3>
             <div class="seg" id="count" role="radiogroup" aria-label="Questions in the round"></div>
@@ -248,6 +262,11 @@
           <p style="margin:0 0 6px"><span class="game-chip" id="chip"></span></p>
           <h3 id="pv-title" style="margin:8px 0 12px"></h3>
           <div id="problems"></div>
+          <div class="parent-only">
+            <a class="btn mint" id="save-app" href="#" style="width:100%">Save to the app</a>
+            <p class="small muted" style="margin:12px 0 0">It will appear in My Tasks on your child's home screen. You can save as many as you like.</p>
+          </div>
+          <div class="teacher-only">
           <div class="qr-box"><canvas id="qr" width="300" height="300" aria-label="QR code for this task" role="img"></canvas></div>
           <dl class="summary" id="summary"></dl>
           <div class="linkrow">
@@ -262,6 +281,18 @@
             <a class="btn small sky" id="open" href="#">Open</a>
           </div>
           <p class="small muted" style="margin:12px 0 0">Scan with the Camera app on iPhone or iPad, or with Scan class QR code on a classroom iPad. Open plays the task on this device if the app is installed.</p>
+          </div>
+        </div>
+        <div class="card drafts teacher-only">
+          <h2 style="font-size:22px;margin-bottom:6px">Save your work</h2>
+          <p class="small muted" style="margin:0 0 10px">Keep this task to finish later: in this browser, or as a file you can open here again from any device.</p>
+          <div class="btns">
+            <button class="btn small mint" type="button" id="draft-save">Save in browser</button>
+            <button class="btn small sky" type="button" id="draft-file">Save to file</button>
+            <button class="btn small white" type="button" id="draft-open">Open file</button>
+          </div>
+          <div id="draft-list" style="margin-top:10px"></div>
+          <input type="file" id="draft-input" accept=".json,application/json" class="hidden">
         </div>
       </aside>
     </form>
@@ -271,7 +302,7 @@
 <div class="hills" aria-hidden="true"><svg viewBox="0 0 1440 160" preserveAspectRatio="none"><path fill="#8EE08A" d="M0 70C300 0 520 10 760 60s480 60 680-20v120H0z"/><path fill="#5CCB78" d="M0 120c240-50 520-60 820-10s460 20 620-10v60H0z"/></svg></div>
 <footer>
   <div class="wrap">
-    <span>© 2026 Toby Jones T/A <a href="https://thecaffeinemediacompany.com">The Caffeine Media Company</a> · Beta on TestFlight soon · iPhone, iPhone Duo and iPad (iOS 17 and newer)</span>
+    <span>© 2026 Toby Jones T/A <a href="https://thecaffeinemediacompany.com">The Caffeine Media Company</a></span>
     <span><a href="/">Home</a> · <a href="/education/">For Education</a></span>
     <span class="social" aria-label="Toby Jones on social media"><a href="https://x.com/tobyj1512" rel="me">X</a> · <a href="https://www.threads.com/@tobyjones1512" rel="me">Threads</a> · <a href="https://truthsocial.com/@tobyjones1512" rel="me">Truth Social</a> · <a href="https://www.linkedin.com/in/toby-r-jones" rel="me">LinkedIn</a></span>
   </div>
