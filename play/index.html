@@ -90,7 +90,7 @@
     $("task").classList.add("hidden"); $("bad").classList.remove("hidden");
     $("say").textContent = "Hmm, I can't read that task.";
   } else {
-    const info = WWQ.describe(task);
+    const info = WWQ.describe(task, true);
     $("chip").textContent = info.game.title;
     $("chip").style.background = info.game.color;
     $("title").textContent = task.t || info.game.title;

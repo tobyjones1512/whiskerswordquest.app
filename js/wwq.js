@@ -98,20 +98,21 @@
       .filter((w) => w.length >= 2 && w.length <= 20 && !seen.has(w) && seen.add(w));
   }
 
-  // A plain-English summary of a task, for the card, image, PDF and play page.
-  function describe(t) {
+  // A plain-English summary of a task. `hide` is for anything children see (the image, PDF and play page):
+  // it never lists the words, groups or pairs, so a spelling test isn't given away.
+  function describe(t, hide = false) {
     const g = games.find((x) => x.key === t.g);
     const e = englishes.find((x) => x.id === t.e) || englishes[0];
     const D = window.WWQ_DATA || { sorts: {}, pairs: {} };
     const lines = [];
     if (t.y) lines.push(["Year group", e.years[t.y - 1] + " · " + e.name]);
     else lines.push(["English", e.name]);
-    if (t.w) lines.push(["Words", t.w.join(", ")]);
+    if (t.w) lines.push(["Words", hide ? `${t.w.length} word${t.w.length === 1 ? "" : "s"}` : t.w.join(", ")]);
     if (t.q) lines.push(["Questions", t.q === "spell" ? "Spell the word" : "Pick the right spelling"]);
     if (t.g === "spelling" && (!t.q || t.q === "spell")) lines.push(["Keyboard", t.k === "keys" ? "Whole keyboard" : "Restricted (letter tiles)"]);
     if (t.f && t.f.length) lines.push([t.g === "sounds" ? "Sounds" : "Focus sounds", t.f.join(", ")]);
-    if (t.c) lines.push(["Groups", `${t.c.a}: ${t.c.aw.join(", ")} / ${t.c.b}: ${t.c.bw.join(", ")}`]);
-    if (t.p) lines.push(["Pairs", t.p.map((p) => p.join(" = ")).join(", ")]);
+    if (t.c) lines.push(["Groups", hide ? `${t.c.a} or ${t.c.b}` : `${t.c.a}: ${t.c.aw.join(", ")} / ${t.c.b}: ${t.c.bw.join(", ")}`]);
+    if (t.p) lines.push(["Pairs", hide ? `${t.p.length} pairs` : t.p.map((p) => p.join(" = ")).join(", ")]);
     if (t.s && t.s.length) lines.push(["Sets", t.s.map((id) => { const s = D.sorts[id]; const p = D.pairs[id]; return s ? `${s.title} (${s.a} / ${s.b})` : p ? p.title : id; }).join("; ")]);
     if (t.n) lines.push(["Questions in the round", String(t.n)]);
     if (t.h === false) lines.push(["Hints", "Off"]);

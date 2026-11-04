@@ -48,7 +48,7 @@
     const W = 1200, H = 1600, F = "Nunito, ui-rounded, system-ui, sans-serif";
     const cv = document.createElement("canvas"); cv.width = W; cv.height = H;
     const c = cv.getContext("2d");
-    const info = WWQ.describe(task);
+    const info = WWQ.describe(task, true);
 
     const sky = c.createLinearGradient(0, 0, 0, H);
     sky.addColorStop(0, "#6FCBFF"); sky.addColorStop(0.55, "#D6F3FF"); sky.addColorStop(1, "#FFF3D1");

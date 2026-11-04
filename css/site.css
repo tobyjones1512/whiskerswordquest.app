@@ -147,6 +147,7 @@ p { margin: 0 0 1em; }
 .btn.small { --d: 5px; min-height: 44px; padding: 10px 16px; font-size: 16px; border-radius: 16px; }
 .btn svg { width: 22px; height: 22px; flex: none; }
 .btns { display: flex; flex-wrap: wrap; gap: 12px; }
+.btns > .btn:not(.small) { min-width: min(250px, 100%); }
 .center .btns { justify-content: center; }
 
 /* ---------- Pills, chips ---------- */
@@ -174,7 +175,7 @@ p { margin: 0 0 1em; }
 
 /* ---------- Game tiles (like the home screen cards) ---------- */
 .tile {
-  --c: var(--coral);
+  --c: var(--coral); height: calc(100% - 7px);
   border-radius: 26px; padding: 20px 16px 18px; text-align: center; color: #fff;
   background: linear-gradient(color-mix(in srgb, var(--c), #fff 14%), var(--c));
   box-shadow: 0 7px 0 color-mix(in srgb, var(--c), #000 28%), inset 0 0 0 3px var(--c), inset 0 0 0 5.5px rgba(255, 255, 255, .4);
@@ -189,15 +190,29 @@ p { margin: 0 0 1em; }
 .tile p { margin: 0; font-size: 15px; opacity: .95; text-shadow: 0 1px 0 rgba(0, 0, 0, .15); }
 
 /* ---------- Screenshots ---------- */
+.carousel { position: relative; }
 .shots {
-  display: flex; gap: 18px; overflow-x: auto; scroll-snap-type: x mandatory;
-  padding: 8px 16px 22px; margin: 0 -16px; scrollbar-width: none;
+  display: flex; gap: 18px; overflow-x: auto; scroll-snap-type: x mandatory; scroll-behavior: smooth;
+  padding: 8px 4px 18px; scroll-padding-inline: 4px;
+  scrollbar-width: thin; scrollbar-color: rgba(31, 42, 68, .35) transparent;
 }
-.shots::-webkit-scrollbar { display: none; }
+.shots::-webkit-scrollbar { height: 8px; }
+.shots::-webkit-scrollbar-thumb { background: rgba(31, 42, 68, .3); border-radius: 8px; }
 .shots img {
-  scroll-snap-align: center; flex: none; width: min(240px, 62vw); border-radius: 30px;
-  box-shadow: 0 8px 0 rgba(31, 42, 68, .12); border: 3px solid #fff;
+  scroll-snap-align: start; flex: none; width: min(240px, 62vw); height: auto; aspect-ratio: 1206 / 2622; object-fit: cover;
+  border-radius: 30px; box-shadow: 0 8px 0 rgba(31, 42, 68, .12); border: 3px solid #fff;
 }
+.carousel .arrow {
+  position: absolute; top: calc(50% - 30px); z-index: 1; width: 56px; height: 56px; border-radius: 50%;
+  display: grid; place-items: center; border: 0; cursor: pointer; background: #fff; color: var(--ink);
+  box-shadow: 0 5px 0 #c9d2de, inset 0 0 0 2.5px var(--line); transition: opacity .2s, transform .12s;
+}
+.carousel .arrow:active { transform: translateY(4px); box-shadow: 0 1px 0 #c9d2de, inset 0 0 0 2.5px var(--line); }
+.carousel .arrow svg { width: 24px; height: 24px; }
+.carousel .arrow.prev { left: -10px; }
+.carousel .arrow.next { right: -10px; }
+.carousel .arrow[disabled] { opacity: 0; pointer-events: none; }
+@media (max-width: 640px) { .carousel .arrow { display: none; } }
 
 /* ---------- Lists ---------- */
 .ticks { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; }
