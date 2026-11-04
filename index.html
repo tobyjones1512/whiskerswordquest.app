@@ -60,6 +60,9 @@
 
   <section aria-label="Screenshots">
     <div class="wrap">
+      <div class="carousel">
+      <button class="arrow prev" type="button" aria-label="Previous screenshots"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
+      <button class="arrow next" type="button" aria-label="Next screenshots"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg></button>
       <div class="shots" tabindex="0" aria-label="Screenshots, scroll sideways">
         <img src="/img/01-home.jpg" alt="Home screen with Whiskers, the Daily Challenge and the weekly fish goal" loading="lazy">
         <img src="/img/02-quiz.jpg" alt="A quiz question with big answer buttons" loading="lazy">
@@ -69,6 +72,7 @@
         <img src="/img/06-wardrobe.jpg" alt="The wardrobe, where fish buy outfits for Whiskers" loading="lazy">
         <img src="/img/07-parents.jpg" alt="The grown-ups area with progress and settings" loading="lazy">
       </div>
+      </div>
     </div>
   </section>
 
@@ -76,7 +80,7 @@
     <div class="wrap">
       <h2 class="center">Learn, then play</h2>
       <p class="lead center" style="margin-bottom:28px">Six learning topics and six games, all levelled for ages 5 to 11.</p>
-      <div class="grid four" id="tiles"></div>
+      <div class="grid four" id="tiles" style="grid-auto-rows:1fr"></div>
     </div>
   </section>
 
@@ -157,6 +161,17 @@
     el.querySelector("p").textContent = g.sub;
     tiles.append(el);
   }
+  // Screenshot arrows: a page of shots at a time, hidden at either end.
+  const shots = document.querySelector(".shots");
+  const [prev, next] = document.querySelectorAll(".carousel .arrow");
+  const step = () => Math.max(shots.clientWidth - 120, 260);
+  prev.onclick = () => shots.scrollBy({ left: -step() });
+  next.onclick = () => shots.scrollBy({ left: step() });
+  const ends = () => { prev.disabled = shots.scrollLeft < 8; next.disabled = shots.scrollLeft + shots.clientWidth > shots.scrollWidth - 8; };
+  shots.addEventListener("scroll", ends, { passive: true });
+  addEventListener("resize", ends);
+  addEventListener("load", ends);
+  ends();
   const flags = document.getElementById("flags");
   for (const e of WWQ.englishes) {
     const s = document.createElement("span");
