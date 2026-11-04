@@ -130,14 +130,19 @@
     }
     if (has("count")) {
       const c = radio("count");
-      if (c === "all") t.n = Math.min(30, Math.max(3, words.length * (t.q ? 1 : 2)));
+      if (c === "all") t.n = Math.min(30, Math.max(3, words.length));
       else if (c && c !== "8") t.n = Number(c);
     }
     if (has("hints") && !$("hints").checked) t.h = false;
 
+    // An empty task can't be shared: it needs a name and, where the game has anything to customise, something chosen.
+    if (!title) problems.push("Give your task a name.");
+    const customisable = g.opts.some((o) => ["words", "focus", "sounds", "sets", "pairs", "own"].includes(o));
+    if (customisable && !(t.w || t.f || t.c || t.p || t.x || (t.s && t.s.length))) problems.push("This task is empty. Add your own content, or choose words, sounds or sets in step 3.");
+
     $("words-count").textContent = $("words").value.trim()
       ? `${words.length} word${words.length === 1 ? "" : "s"}${words.length ? ": " + words.join(", ") : ""}` : "";
-    if (has("count") && radio("count") === "all" && words.length * (t.q ? 1 : 2) > 30) problems.push("The app plays up to 30 questions in a round, so some words will be left out. Split long lists into two tasks.");
+    if (has("count") && radio("count") === "all" && words.length > 30) problems.push("The app plays up to 30 questions in a round, so some words will be left out. Split long lists into two tasks.");
     return { t, g, words, problems };
   }
 
@@ -168,8 +173,6 @@
     const { t, problems } = read();
     current = t;
     const link = WWQ.base + encode(t);
-    $("link").value = link;
-    $("open").href = link;
     WWQQR.draw($("qr"), link, 600);
     $("chip").textContent = g.title;
     $("chip").style.background = g.color;
@@ -178,6 +181,9 @@
     $("problems").innerHTML = problems.map((p) => `<p class="notice bad" style="margin:0 0 10px">${esc(p)}</p>`).join("");
     $("save-app").href = "whiskerswordquest://save#" + encode(t);
     const blocked = problems.some((p) => !p.startsWith("The app plays"));
+    $("link").value = blocked ? "" : link;
+    $("open").href = blocked ? "#" : link;
+    $("qr").style.opacity = blocked ? ".1" : "";
     $("save-app").classList.toggle("hidden", blocked);
     for (const id of ["png", "pdf", "share", "copy"]) $(id).disabled = blocked;
     $("open").classList.toggle("hidden", blocked);
