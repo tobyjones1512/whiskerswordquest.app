@@ -300,9 +300,10 @@ input:focus, textarea:focus, select:focus { outline: none; border-color: var(--s
 .madeby span { position: relative; }
 .madeby a { color: #fff; text-decoration: underline; }
 
-/* ---------- TestFlight button ---------- */
-.tf-btn { display: inline-flex; align-items: center; gap: 12px; background: #000; color: #fff; text-decoration: none; border-radius: 14px; padding: 9px 22px 9px 14px; box-shadow: 0 0 0 1.5px #a6a6a6, 0 5px 0 rgba(31, 42, 68, .25); }
-.tf-btn svg { width: 36px; height: 36px; flex: none; }
-.tf-btn span { display: grid; font-size: 26px; font-weight: 800; line-height: 1.05; letter-spacing: -.3px; }
-.tf-btn small { font-size: 12px; font-weight: 700; letter-spacing: 0; }
-.tf-btn:hover { filter: brightness(1.25); }
+/* ---------- TestFlight button: styled like Apple's black store badges ---------- */
+.tf-btn { display: inline-flex; align-items: center; gap: 10px; background: #000; color: #fff; text-decoration: none; border-radius: 10px; padding: 7px 18px 7px 10px; border: 1px solid #a6a6a6; font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Helvetica Neue", Arial, sans-serif; }
+.tf-btn img { width: 34px; height: 34px; flex: none; }
+.tf-btn span { display: grid; text-align: left; font-size: 24px; font-weight: 600; line-height: 1.05; letter-spacing: -.2px; }
+.tf-btn small { font-size: 11px; font-weight: 500; letter-spacing: 0; }
+.tf-btn:hover { background: #1c1c1e; }
+.tf-btn:focus-visible { outline: 3px solid var(--sky); outline-offset: 3px; }
