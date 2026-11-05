@@ -44,3 +44,40 @@ export function cors(req, res, methods) {
   if (req.method !== methods) { res.status(405).json({ error: `${methods} only.` }); return true; }
   return false;
 }
+
+// ---- Maestro Pro student licences: the key is derived from the email, so nothing is stored.
+const STUDENT_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+export const studentKey = (email) => {
+  const h = crypto.createHmac("sha256", process.env.LICENCE_SECRET).update("maestro-students:" + norm(email)).digest();
+  const s = Array.from(h.subarray(0, 20), (b) => STUDENT_ALPHABET[b % 32]).join("");
+  return s.match(/.{5}/g).join("-");
+};
+export const validEmail = (e) => /^[^\s@<>,;]+@[^\s@<>,;]+\.[^\s@<>,;]+$/.test(e) && e.length <= 200;
+export const sameKey = (a, b) => {
+  const x = Buffer.from(String(a ?? "").trim().toUpperCase()), y = Buffer.from(b);
+  return x.length === y.length && crypto.timingSafeEqual(x, y);
+};
+
+/** True when GoCardless shows this email's latest bill is paid or on its way: an active subscription, or a £48+ payment in the last year. */
+export async function studentHasPaid(email) {
+  const want = norm(email);
+  // ponytail: scans every customer (500 a page); switch to a stored customer id if this passes a few thousand.
+  let after = "", ids = [];
+  for (let page = 0; page < 20; page++) {
+    const r = (await gc("GET", `/customers?limit=500${after && `&after=${after}`}`)).data;
+    ids.push(...(r.customers || []).filter((c) => norm(c.email) === want).map((c) => c.id));
+    after = r.meta?.cursors?.after;
+    if (!after) break;
+  }
+  const yearAgo = Date.now() - 366 * 864e5;
+  // Bacs takes days, so a payment still on its way counts; one that failed, was cancelled or was charged back does not.
+  const bad = ["failed", "cancelled", "customer_approval_denied", "charged_back"];
+  for (const id of ids) {
+    const pays = ((await gc("GET", `/payments?customer=${id}`)).data.payments || []).sort((x, y) => Date.parse(y.created_at) - Date.parse(x.created_at));
+    const latest = pays[0];   // the latest bill must not have bounced
+    const subs = (await gc("GET", `/subscriptions?customer=${id}&status=active`)).data.subscriptions || [];
+    if (subs.length && !(latest && bad.includes(latest.status))) return true;
+    if (latest && !bad.includes(latest.status) && latest.amount >= 4800 && Date.parse(latest.created_at) > yearAgo) return true;
+  }
+  return false;
+}
