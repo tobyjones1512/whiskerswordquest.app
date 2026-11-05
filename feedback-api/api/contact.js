@@ -29,7 +29,7 @@ export default async function handler(req, res) {
       method: "POST",
       headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}`, "Content-Type": "application/json" },
       body: JSON.stringify({
-        from: process.env.CONTACT_FROM || "Whiskers' Word Quest <hello@thecaffeinemediacompany.com>",
+        from: process.env.CONTACT_FROM || "Whiskers' Word Quest <noreply@thecaffeinemediacompany.com>",
         to: [TO], cc: [e], reply_to: e,
         subject: `Whiskers' Word Quest enquiry from ${n.replace(/[\r\n]/g, " ")}`,
         text: `From: ${n} <${e}>\n\n${m}`,
