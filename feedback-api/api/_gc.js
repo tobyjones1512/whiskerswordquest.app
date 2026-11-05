@@ -45,41 +45,44 @@ export function cors(req, res, methods) {
   return false;
 }
 
-// ---- Maestro Pro student licences: the key is derived from the email, so nothing is stored.
-const STUDENT_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-export const studentKey = (email) => {
-  const h = crypto.createHmac("sha256", process.env.LICENCE_SECRET).update("maestro-students:" + norm(email)).digest();
-  const s = Array.from(h.subarray(0, 20), (b) => STUDENT_ALPHABET[b % 32]).join("");
-  return s.match(/.{5}/g).join("-");
-};
+// ---- Maestro Pro student licences: MPS-<GoCardless customer id>-<signature>, like the Whiskers' Word Quest keys.
+const stuTag = (id) => crypto.createHmac("sha256", process.env.LICENCE_SECRET).update("maestro-students:" + id).digest("hex").slice(0, 10).toUpperCase();
+export const studentKey = (customerId) => `MPS-${customerId}-${stuTag(customerId)}`;
+/** The GoCardless customer id inside a genuine key, or null. */
+export function parseStudentKey(key) {
+  const m = /^MPS-(CU[A-Z0-9]+)-([A-F0-9]{10})$/.exec(String(key ?? "").trim().toUpperCase());
+  return m && crypto.timingSafeEqual(Buffer.from(stuTag(m[1])), Buffer.from(m[2])) ? m[1] : null;
+}
 export const validEmail = (e) => /^[^\s@<>,;]+@[^\s@<>,;]+\.[^\s@<>,;]+$/.test(e) && e.length <= 200;
-export const sameKey = (a, b) => {
-  const x = Buffer.from(String(a ?? "").trim().toUpperCase()), y = Buffer.from(b);
-  return x.length === y.length && crypto.timingSafeEqual(x, y);
-};
 
-/** True when GoCardless shows this email's latest bill is paid or on its way: an active subscription, or a £48+ payment in the last year. */
-export async function studentHasPaid(email) {
+/** Every GoCardless customer id with this email. */
+export async function customersByEmail(email) {
   const want = norm(email);
-  // ponytail: scans every customer (500 a page); switch to a stored customer id if this passes a few thousand.
+  // ponytail: scans every customer (500 a page); fine for hundreds of students, store ids if it grows.
   let after = "", ids = [];
   for (let page = 0; page < 20; page++) {
-    const res = await gc("GET", `/customers?limit=500${after && `&after=${after}`}`);
-    if (res.status !== 200) throw new Error("GoCardless: " + JSON.stringify(res.data.error || res.status)); // e.g. a sandbox token against the live API
-    const r = res.data;
+    const r = (await gc("GET", `/customers?limit=500${after && `&after=${after}`}`)).data;
     ids.push(...(r.customers || []).filter((c) => norm(c.email) === want).map((c) => c.id));
     after = r.meta?.cursors?.after;
     if (!after) break;
   }
-  const yearAgo = Date.now() - 366 * 864e5;
+  return ids;
+}
+
+const isMaestro = (x) => /maestro pro/i.test(x ?? "");
+
+/** True when this customer's latest bill is paid or on its way, for a plan with "Maestro Pro" in its title, at any price
+ *  (students pay £48 a year or £6 a month, schools more): a one-off payment from the last year, or an active
+ *  subscription or instalment schedule. */
+export async function studentHasPaid(customerId) {
   // Bacs takes days, so a payment still on its way counts; one that failed, was cancelled or was charged back does not.
   const bad = ["failed", "cancelled", "customer_approval_denied", "charged_back"];
-  for (const id of ids) {
-    const pays = ((await gc("GET", `/payments?customer=${id}`)).data.payments || []).sort((x, y) => Date.parse(y.created_at) - Date.parse(x.created_at));
-    const latest = pays[0];   // the latest bill must not have bounced
-    const subs = ((await gc("GET", `/subscriptions?customer=${id}`)).data.subscriptions || []).filter((x) => ["active", "pending_customer_approval", "pending_first_payment"].includes(x.status));
-    if (subs.length && !(latest && bad.includes(latest.status))) return true;
-    if (latest && !bad.includes(latest.status) && latest.amount >= 4800 && Date.parse(latest.created_at) > yearAgo) return true;
-  }
-  return false;
+  const pays = ((await gc("GET", `/payments?customer=${customerId}`)).data.payments || []).sort((x, y) => Date.parse(y.created_at) - Date.parse(x.created_at));
+  const latest = pays[0];
+  if (!latest || bad.includes(latest.status)) return false;
+  if (isMaestro(latest.description) && Date.parse(latest.created_at) > Date.now() - 366 * 864e5) return true;
+  const subs = (await gc("GET", `/subscriptions?customer=${customerId}&status=active`)).data.subscriptions || [];
+  if (subs.some((x) => isMaestro(x.name))) return true;
+  const inst = (await gc("GET", `/instalment_schedules?customer=${customerId}`)).data.instalment_schedules || [];
+  return inst.some((x) => ["pending", "active"].includes(x.status) && isMaestro(x.name));
 }

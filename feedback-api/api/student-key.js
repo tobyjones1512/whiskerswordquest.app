@@ -1,6 +1,6 @@
 // Maestro Pro students: if GoCardless shows the email has paid, emails them their licence key (never returned to the page,
 // so only the owner of the inbox gets it). Needs RESEND_API_KEY, GOCARDLESS_ACCESS_TOKEN, LICENCE_SECRET.
-import { studentKey, studentHasPaid, validEmail } from "./_gc.js";
+import { studentKey, studentHasPaid, customersByEmail, validEmail } from "./_gc.js";
 
 const ORIGINS = ["https://thecaffeinemediacompany.com", "https://www.thecaffeinemediacompany.com"];
 
@@ -19,8 +19,10 @@ export default async function handler(req, res) {
   const e = String(req.body?.email ?? "").trim();
   if (!validEmail(e)) return res.status(400).json({ error: "Enter a valid email address." });
   try {
-    if (!(await studentHasPaid(e))) return res.status(402).json({ error: "We can't find a payment for that email address. Use the email you paid with." });
-    const k = studentKey(e);
+    let id;
+    for (const c of await customersByEmail(e)) if (await studentHasPaid(c)) { id = c; break; }
+    if (!id) return res.status(402).json({ error: "We can't find a payment for that email address. Use the email you paid with." });
+    const k = studentKey(id);
     const note = "This inbox is not monitored, so please do not reply to this email.";
     const r = await fetch("https://api.resend.com/emails", {
       method: "POST",
@@ -29,8 +31,8 @@ export default async function handler(req, res) {
         from: process.env.CONTACT_FROM || "Maestro Pro <noreply@thecaffeinemediacompany.com>",
         to: [e],
         subject: "Your Maestro Pro licence key",
-        text: `Your Maestro Pro licence key is:\n\n${k}\n\nIn the app, tap "Already have a licence key?" on the paywall and enter this key with the email address this message was sent to.\n\n${note}`,
-        html: `<p>Your Maestro Pro licence key is:</p><p><b>${k}</b></p><p>In the app, tap &ldquo;Already have a licence key?&rdquo; on the paywall and enter this key with the email address this message was sent to.</p><p>${note}</p>`,
+        text: `Your Maestro Pro licence key is:\n\n${k}\n\nIn the app, tap "Already have a licence key?" on the paywall and enter this key.\n\n${note}`,
+        html: `<p>Your Maestro Pro licence key is:</p><p><b>${k}</b></p><p>In the app, tap &ldquo;Already have a licence key?&rdquo; on the paywall and enter this key.</p><p>${note}</p>`,
       }),
     });
     if (!r.ok) return res.status(502).json({ error: "The email couldn't be sent." });
