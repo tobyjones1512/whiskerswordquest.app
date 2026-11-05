@@ -12,7 +12,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Nunito:wght@700;800;900&display=swap">
 <link rel="stylesheet" href="/css/site.css">
-<style>.warn{background:#FFF4D6;border-radius:18px;padding:16px 20px;margin-bottom:22px}.warn ul{margin:8px 0 0;padding-left:20px}.hp{position:absolute;left:-9999px}#msg{font-weight:800;margin:14px 0 0}#msg.err{color:#c62828}</style>
+<style>.warn{background:#FFF4D6;border-radius:18px;padding:16px 20px;margin-bottom:22px}.warn ul{margin:8px 0 0;padding-left:20px}#name:disabled{filter:blur(4px);opacity:.6;cursor:not-allowed}.hp{position:absolute;left:-9999px}#msg{font-weight:800;margin:14px 0 0}#msg.err{color:#c62828}</style>
 </head>
 <body>
 <div class="sky" aria-hidden="true"><div class="cloud"><span></span></div><div class="cloud"><span></span></div><div class="cloud"><span></span></div><div class="cloud"><span></span></div></div>
@@ -42,7 +42,7 @@
       <div class="field"><label for="name">Your name</label><input type="text" id="name" maxlength="100" autocomplete="name" required></div>
       <div class="field"><label for="email">Your email</label><input type="email" id="email" maxlength="200" autocomplete="email" required><span class="hint">We'll send the TestFlight link to this address.</span></div>
       <div class="field"><label for="role">I am a…</label>
-        <select id="role" required><option value="">Choose one</option><option>Parent</option><option>Teacher</option><option>Teaching Assistant</option><option>Educational Institution</option><option>Other Education Professional</option><option>Other</option></select></div>
+        <select id="role" required><option value="">Choose one</option><option>Child</option><option>Parent</option><option>Teacher</option><option>Teaching Assistant</option><option>Educational Institution</option><option>Other Education Professional</option><option>Other</option></select></div>
       <label style="display:flex;gap:10px;align-items:flex-start;margin-bottom:16px"><input type="checkbox" id="ok" style="margin-top:5px"> <span>I understand Canary builds may be buggy, can break at any time, and my child's progress may be reset.</span></label>
       <input class="hp" type="text" id="website" tabindex="-1" autocomplete="off" aria-hidden="true">
       <div class="btns"><button class="btn mint" id="send" type="submit">Email me the link</button></div>
@@ -66,16 +66,22 @@
 <script>
   const API = "https://fider-feedback-api.vercel.app/api/testflight";
   const $ = (id) => document.getElementById(id);
+  // Children's names are never collected: the box is blurred, disabled and emptied.
+  $("role").addEventListener("change", () => {
+    const child = $("role").value === "Child";
+    $("name").disabled = child;
+    if (child) $("name").value = "";
+  });
   $("f").addEventListener("submit", async (e) => {
     e.preventDefault();
     const msg = $("msg"), btn = $("send");
     msg.className = "";
-    if (!$("name").value.trim() || !$("email").validity.valid || !$("role").value) { msg.className = "err"; msg.textContent = "Please fill in your name, a valid email and who you are."; return; }
+    if ((!$("name").value.trim() && $("role").value !== "Child") || !$("email").validity.valid || !$("role").value) { msg.className = "err"; msg.textContent = "Please fill in your name (not needed for children), a valid email and who you are."; return; }
     if (!$("ok").checked) { msg.className = "err"; msg.textContent = "Please tick the box to say you understand."; return; }
     btn.disabled = true; msg.textContent = "Sending…";
     try {
       const r = await fetch(API, { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: $("name").value, email: $("email").value, role: $("role").value, website: $("website").value }) });
+        body: JSON.stringify({ name: $("role").value === "Child" ? "" : $("name").value, email: $("email").value, role: $("role").value, website: $("website").value }) });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(j.error || "Couldn't send. Please try again.");
       $("f").reset(); msg.textContent = "Thanks! Check your inbox for the TestFlight link (and your junk folder).";
