@@ -95,7 +95,8 @@ h1, h2, h3 { line-height: 1.1; margin: 0 0 .4em; font-weight: 900; }
 h2 { font-size: clamp(28px, 4.5vw, 40px); }
 h3 { font-size: 22px; }
 p { margin: 0 0 1em; }
-.lead { font-size: clamp(18px, 2.4vw, 22px); color: var(--soft); max-width: 40em; }
+h1, h2, .lead { text-align: center; }
+.lead { margin-inline: auto; font-size: clamp(18px, 2.4vw, 22px); color: var(--soft); max-width: 40em; }
 .center .lead { margin-inline: auto; }
 .muted { color: var(--soft); }
 .small { font-size: 14px; }
@@ -251,7 +252,7 @@ footer a { font-weight: 800; }
 label { font-weight: 900; }
 .field { display: grid; gap: 6px; margin-bottom: 16px; }
 .field .hint { font-size: 14px; color: var(--soft); font-weight: 700; }
-input[type=text], input[type=number], textarea, select {
+input[type=text], input[type=email], input[type=number], textarea, select {
   font: 800 17px var(--font); color: var(--ink);
   width: 100%; padding: 12px 14px; border-radius: 16px;
   border: 2.5px solid rgba(31, 42, 68, .18); background: #fff;
