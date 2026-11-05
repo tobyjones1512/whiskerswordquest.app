@@ -64,7 +64,9 @@ export async function studentHasPaid(email) {
   // ponytail: scans every customer (500 a page); switch to a stored customer id if this passes a few thousand.
   let after = "", ids = [];
   for (let page = 0; page < 20; page++) {
-    const r = (await gc("GET", `/customers?limit=500${after && `&after=${after}`}`)).data;
+    const res = await gc("GET", `/customers?limit=500${after && `&after=${after}`}`);
+    if (res.status !== 200) throw new Error("GoCardless: " + JSON.stringify(res.data.error || res.status)); // e.g. a sandbox token against the live API
+    const r = res.data;
     ids.push(...(r.customers || []).filter((c) => norm(c.email) === want).map((c) => c.id));
     after = r.meta?.cursors?.after;
     if (!after) break;
@@ -75,7 +77,7 @@ export async function studentHasPaid(email) {
   for (const id of ids) {
     const pays = ((await gc("GET", `/payments?customer=${id}`)).data.payments || []).sort((x, y) => Date.parse(y.created_at) - Date.parse(x.created_at));
     const latest = pays[0];   // the latest bill must not have bounced
-    const subs = (await gc("GET", `/subscriptions?customer=${id}&status=active`)).data.subscriptions || [];
+    const subs = ((await gc("GET", `/subscriptions?customer=${id}`)).data.subscriptions || []).filter((x) => ["active", "pending_customer_approval", "pending_first_payment"].includes(x.status));
     if (subs.length && !(latest && bad.includes(latest.status))) return true;
     if (latest && !bad.includes(latest.status) && latest.amount >= 4800 && Date.parse(latest.created_at) > yearAgo) return true;
   }
