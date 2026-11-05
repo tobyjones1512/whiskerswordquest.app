@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<title>Licence application</title>
+</head>
+<body>
+<h3>Licence application</h3>
+<p>For registered educational institutions in the United Kingdom.</p>
+<form id="f">
+<table>
+<tr><td>Institution name:</td></tr>
+<tr><td><input type="text" id="institution" size="40" maxlength="120"></td></tr>
+<tr><td>URN or UKPRN:</td></tr>
+<tr><td><input type="text" id="urn" size="12" maxlength="10"></td></tr>
+<tr><td>Contact email:</td></tr>
+<tr><td><input type="text" id="email" size="40"></td></tr>
+<tr><td>Plan:</td></tr>
+<tr><td>
+<input type="radio" name="plan" value="year" id="y" checked><label for="y">&pound;350 per year</label><br>
+<input type="radio" name="plan" value="month" id="m"><label for="m">&pound;35 per month</label>
+</td></tr>
+<tr><td><input type="checkbox" id="registered"><label for="registered">This is a registered educational institution in the UK.</label></td></tr>
+<tr><td><input type="submit" id="go" value="Continue to payment"></td></tr>
+</table>
+</form>
+<p>Payment is by Direct Debit through GoCardless. You will be taken to their secure page.</p>
+<p id="msg"></p>
+<script>
+  const API = "https://fider-feedback-api.vercel.app/api/licence-start";
+  const $ = (id) => document.getElementById(id);
+  $("f").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    $("go").disabled = true; $("msg").textContent = "Please wait...";
+    try {
+      const r = await fetch(API, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          institution: $("institution").value, urn: $("urn").value, email: $("email").value,
+          plan: document.querySelector("input[name=plan]:checked").value, registered: $("registered").checked,
+        }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || "Something went wrong.");
+      top.location.href = j.url;
+    } catch (err) {
+      $("msg").textContent = err.message || "Something went wrong.";
+      $("go").disabled = false;
+    }
+  });
+</script>
+</body>
+</html>

@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<title>Your licence key</title>
+<meta name="robots" content="noindex">
+</head>
+<body>
+<h2>Your licence key</h2>
+<p id="out">Setting up your licence...</p>
+<script>
+  const r = new URLSearchParams(location.search).get("r") || "";
+  const out = document.getElementById("out");
+  fetch("https://fider-feedback-api.vercel.app/api/licence-complete?r=" + encodeURIComponent(r))
+    .then((x) => x.json().then((j) => ({ ok: x.ok, j })))
+    .then(({ ok, j }) => {
+      if (!ok) { out.textContent = j.error || "Something went wrong. Please try again in a minute."; return; }
+      out.innerHTML = "";
+      const add = (tag, text) => { const el = document.createElement(tag); el.textContent = text; out.append(el); return el; };
+      add("p", "Thank you. Keep this key safe:");
+      add("pre", j.key);
+      add("p", "Licensed to: " + j.institution);
+      add("p", "In the app, open Grown-ups, then Classroom, and enter this key together with the institution name exactly as above.");
+    })
+    .catch(() => { out.textContent = "Couldn't reach the server. Please reload this page."; });
+</script>
+</body>
+</html>
