@@ -35,7 +35,8 @@ export default async function handler(req, res) {
     });
     if (!r.ok) return res.status(502).json({ error: "The email couldn't be sent." });
     res.status(200).json({ ok: true });
-  } catch {
-    res.status(502).json({ error: "Couldn't reach the payment or email service." });
+  } catch (err) {
+    console.error(err);
+    res.status(502).json({ error: "Couldn't reach the payment or email service. (" + String(err.message).slice(0, 200) + ")" });
   }
 }
