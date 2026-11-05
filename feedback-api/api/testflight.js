@@ -3,7 +3,7 @@
 const ORIGINS = ["https://whiskerswordquest.app", "https://www.whiskerswordquest.app"];
 const TO = "hello@thecaffeinemediacompany.com";
 const LINK = "https://testflight.apple.com/join/ZHBZ1N34";
-const ROLES = ["Parent", "Teacher", "Teaching Assistant", "Educational Institution", "Other Education Professional"];
+const ROLES = ["Parent", "Teacher", "Teaching Assistant", "Educational Institution", "Other Education Professional", "Other"];
 const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 
 export default async function handler(req, res) {
