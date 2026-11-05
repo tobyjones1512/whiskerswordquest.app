@@ -189,6 +189,9 @@ p { margin: 0 0 1em; }
 .tile h3 { font-size: 21px; margin: 0 0 4px; text-shadow: 0 2px 0 rgba(0, 0, 0, .2); }
 .tile p { margin: 0; font-size: 15px; opacity: .95; text-shadow: 0 1px 0 rgba(0, 0, 0, .15); }
 
+.tiles-row { display: flex; gap: 18px; overflow-x: auto; scroll-snap-type: x proximity; padding: 4px 4px 14px; }
+.tiles-row .tile { flex: 0 0 210px; scroll-snap-align: start; }
+
 /* ---------- Screenshots ---------- */
 .carousel { position: relative; }
 .shots {
