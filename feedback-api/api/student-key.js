@@ -2,7 +2,7 @@
 // so only the owner of the inbox gets it). Needs RESEND_API_KEY, GOCARDLESS_ACCESS_TOKEN, LICENCE_SECRET.
 import { studentKey, studentHasPaid, customersByEmail, validEmail } from "./_gc.js";
 
-const ORIGINS = ["https://thecaffeinemediacompany.com", "https://www.thecaffeinemediacompany.com"];
+const ORIGINS = ["https://maestro-pro.app", "https://www.maestro-pro.app", "https://thecaffeinemediacompany.com", "https://www.thecaffeinemediacompany.com"];
 
 export default async function handler(req, res) {
   const origin = req.headers.origin;
@@ -23,6 +23,7 @@ export default async function handler(req, res) {
     for (const c of await customersByEmail(e)) if (await studentHasPaid(c)) { id = c; break; }
     if (!id) return res.status(402).json({ error: "We can't find a payment for that email address. Use the email you paid with." });
     const k = studentKey(id);
+    const tf = "https://testflight.apple.com/join/rPBpRCu9";
     const note = "This inbox is not monitored, so please do not reply to this email.";
     const r = await fetch("https://api.resend.com/emails", {
       method: "POST",
@@ -31,8 +32,8 @@ export default async function handler(req, res) {
         from: process.env.CONTACT_FROM || "Maestro Pro <noreply@thecaffeinemediacompany.com>",
         to: [e],
         subject: "Your Maestro Pro licence key",
-        text: `Your Maestro Pro licence key is:\n\n${k}\n\nIn the app, tap "Already have a licence key?" on the paywall and enter this key.\n\n${note}`,
-        html: `<p>Your Maestro Pro licence key is:</p><p><b>${k}</b></p><p>In the app, tap &ldquo;Already have a licence key?&rdquo; on the paywall and enter this key.</p><p>${note}</p>`,
+        text: `Your Maestro Pro licence key is:\n\n${k}\n\nIn the app, tap "Already have a licence key?" on the paywall and enter this key.\n\nNot installed yet? Install Maestro Pro with TestFlight: ${tf}\n\n${note}`,
+        html: `<p>Your Maestro Pro licence key is:</p><p><b>${k}</b></p><p>In the app, tap &ldquo;Already have a licence key?&rdquo; on the paywall and enter this key.</p><p>Not installed yet? <a href="${tf}">Install Maestro Pro with TestFlight</a>.</p><p>${note}</p>`,
       }),
     });
     if (!r.ok) return res.status(502).json({ error: "The email couldn't be sent." });
