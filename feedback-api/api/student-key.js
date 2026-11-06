@@ -32,8 +32,8 @@ export default async function handler(req, res) {
         from: process.env.CONTACT_FROM || "Maestro Pro <noreply@thecaffeinemediacompany.com>",
         to: [e],
         subject: "Your Maestro Pro licence key",
-        text: `Your Maestro Pro licence key is:\n\n${k}\n\nIn the app, tap "Already have a licence key?" on the paywall and enter this key.\n\nNot installed yet? Install Maestro Pro with TestFlight: ${tf}\n\n${note}`,
-        html: `<p>Your Maestro Pro licence key is:</p><p><b>${k}</b></p><p>In the app, tap &ldquo;Already have a licence key?&rdquo; on the paywall and enter this key.</p><p>Not installed yet? <a href="${tf}">Install Maestro Pro with TestFlight</a>.</p><p>${note}</p>`,
+        text: `Your Maestro Pro licence key is:\n\n${k}\n\nIn the app, tap "Already have a licence key?" on the paywall and enter this key.\n\nInstall Maestro Pro with TestFlight: ${tf}\n\n${note}`,
+        html: `<p>Your Maestro Pro licence key is:</p><p><b>${k}</b></p><p>In the app, tap &ldquo;Already have a licence key?&rdquo; on the paywall and enter this key.</p><p>Install Maestro Pro with <a href="${tf}">TestFlight</a>.</p><p>${note}</p>`,
       }),
     });
     if (!r.ok) return res.status(502).json({ error: "The email couldn't be sent." });
