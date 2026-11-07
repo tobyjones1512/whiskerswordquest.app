@@ -2,8 +2,11 @@
 // licences) the key is in use on no more than 3 devices. The app sends only the key, so devices are told apart by a cookie (see _devices.js).
 import { parseStudentKey, studentHasPaid } from "./_gc.js";
 import { deviceGate, cookieHeader } from "./_devices.js";
+import devicesPage from "./_devices-page.js";
 
 export default async function handler(req, res) {
+  // The website's devices page (maestro-pro.app/key/devices/) shares this endpoint; the app only ever sends {key}.
+  if (req.method === "OPTIONS" || ["list", "remove", "remove-all"].includes(req.body?.action)) return devicesPage(req, res);
   if (req.method !== "POST") return res.status(405).json({ error: "POST only." });
   const id = parseStudentKey(req.body?.key);
   if (!id) return res.status(200).json({ valid: false, error: "That licence key isn't valid." });

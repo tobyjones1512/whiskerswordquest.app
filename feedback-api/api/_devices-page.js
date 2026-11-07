@@ -1,4 +1,5 @@
-// The devices page on the website (maestro-pro.app/key/devices/): lists the devices a licence key is being used on and removes them.
+// The devices page on the website (maestro-pro.app/key/devices/), reached through student-check.js (Vercel's free plan allows only 12 functions,
+// so this is a helper, not an endpoint of its own): lists the devices a licence key is being used on and removes them.
 // Whoever holds the key can use the licence, so the key is what proves it is theirs. Removing a device frees its place straight away and
 // signs that device out the next time it checks the licence.
 import { parseStudentKey } from "./_gc.js";
