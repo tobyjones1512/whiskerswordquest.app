@@ -534,7 +534,7 @@ export default async function handler(req, res) {
     const name = firstName(from);
     const aiNotice = await senderInEu(addr(from));
     const inlineReply = escalate ? safe : autoLink(relinkInline(safe), [...d.links.map((k) => ({ target: k, anchors: LINK_ANCHORS[k] || [] })), ...pagePairs.map((g) => ({ target: g.slug, anchors: [g.title, g.title.replace(/\s+guide$/i, "")] }))]);
-    const { text, html } = buildEmail({ name, reply: inlineReply, buttons, guides: guideCards, aiNotice, resolve });
+    const { text, html } = buildEmail({ name, reply: inlineReply, buttons, guides: guideCards, aiNotice, resolve, contact: escalate ? ESCALATIONS : SUPPORT });
 
     const scheduledAt = process.env.REPLY_DELAY === "on" ? replyTime() : undefined;
     const r = await send({
