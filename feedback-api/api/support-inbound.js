@@ -35,11 +35,49 @@ Rules:
 - Be brief, warm and plain: 2 to 5 short sentences, British English, no markdown. Sign off with nothing; a signature is added for you.
 - If they want a refund or to cancel: say it is handled on the cancellation page and cannot be done by email (links: ["refund"]).
 - If they lost or can't find their licence key: links ["key"]. If they lost the TestFlight or download link: links ["testflight"].
-- For how-to or fault questions you are confident about from the facts above, answer, and add "guide" or "troubleshooting" links if useful.
+- You may be given <guide_page> excerpts from the official guide. Use them to answer how-to and fault questions, in plain terms for a user, step by step if needed. Never invent a setting, menu or feature that is not in the facts or the excerpts; if they do not cover the question, escalate.
+- Add the "guide" link when you used an excerpt (it points at the page), and "troubleshooting" for faults.
 - Never promise refunds, discounts, dates or features. Never ask for card details or passwords.
 - Do not write any URLs yourself; use the links field.
 - If you are not sure, or it is a complaint, a bug report needing investigation, a legal or data request, or anything else, set escalate to true and write a short holding reply saying Toby will look at it personally.
 Reply with only JSON: {"reply": string, "links": string[], "escalate": boolean}. Allowed links: ${Object.keys(LINKS).join(", ")}.`;
+
+// ---- Reference material: the public guide at maestro-pro.app/guide, fetched on demand and cached for an hour.
+// Only the two pages that best match the email are sent to the model, so a reply costs a few thousand tokens, not the whole guide.
+const GUIDE = "https://maestro-pro.app/guide/";
+let guideCache = { at: 0, pages: [] };
+const textOf = (html) =>
+  html.replace(/<(script|style|nav|header|footer)[\s\S]*?<\/\1>/gi, " ").replace(/<(br|\/p|\/li|\/h\d)\s*\/?>/gi, "\n").replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&ndash;|&mdash;/g, "-").replace(/&[a-z#0-9]+;/gi, "").replace(/[ \t]+/g, " ").replace(/\n\s*\n+/g, "\n").trim();
+
+async function guidePages() {
+  if (guideCache.pages.length && Date.now() - guideCache.at < 3600e3) return guideCache.pages;
+  try {
+    const index = await (await fetch(GUIDE + "index.html")).text();
+    const slugs = [...new Set([...index.matchAll(/href="([a-z-]+\.html)"/g)].map((m) => m[1]))].filter((x) => x !== "index.html");
+    const pages = await Promise.all(slugs.map(async (slug) => {
+      const html = await (await fetch(GUIDE + slug)).text();
+      const title = (/<h1[^>]*>([\s\S]*?)<\/h1>/i.exec(html)?.[1] || slug).replace(/<[^>]+>/g, "").replace(/&amp;/g, "&").trim();
+      const body = textOf((/<article[\s\S]*?<\/article>/i.exec(html) || [html])[0]);
+      return { url: GUIDE + slug, title, body };
+    }));
+    guideCache = { at: Date.now(), pages };
+  } catch { /* no reference material this time; the model will escalate what it can't answer */ }
+  return guideCache.pages;
+}
+
+const words = (t) => String(t).toLowerCase().match(/[a-z0-9]{4,}/g) || [];
+/** The (up to) two guide pages that share the most words with the email, titles counting triple. */
+async function relevantPages(subject, body) {
+  const want = new Set(words(subject + " " + body));
+  const scored = (await guidePages()).map((p) => {
+    let n = 0;
+    for (const w of words(p.title)) if (want.has(w)) n += 3;
+    for (const w of new Set(words(p.body))) if (want.has(w)) n += 1;
+    return { p, n };
+  }).filter((x) => x.n > 2).sort((a, b) => b.n - a.n).slice(0, 2);
+  return scored.map((x) => x.p);
+}
 
 async function readRaw(req) {
   if (Buffer.isBuffer(req.body)) return req.body.toString("utf8");
@@ -83,7 +121,7 @@ const plain = (e) => {
   return t.slice(0, 4000);
 };
 
-async function draft(subject, body) {
+async function draft(subject, body, pages = []) {
   const r = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, "Content-Type": "application/json" },
@@ -94,7 +132,7 @@ async function draft(subject, body) {
       response_format: { type: "json_object" },
       messages: [
         { role: "system", content: SYSTEM },
-        { role: "user", content: `Subject: ${subject}\n\n<customer_email>\n${body}\n</customer_email>` },
+        { role: "user", content: `${pages.map((p) => `<guide_page title="${p.title}">\n${p.body.slice(0, 5000)}\n</guide_page>`).join("\n")}\nSubject: ${subject}\n\n<customer_email>\n${body}\n</customer_email>` },
       ],
     }),
   });
@@ -129,11 +167,14 @@ export default async function handler(req, res) {
     const subject = String(evt.data.subject || full.subject || "(no subject)").replace(/[\r\n]+/g, " ").slice(0, 200);
     const body = plain(full);
     const msgId = evt.data.message_id || full.message_id;
-    const d = await draft(subject, body);
+    const pages = await relevantPages(subject, body);
+    const d = await draft(subject, body, pages);
 
-    const linkText = d.links.map((k) => `${LINKS[k][0]}: ${LINKS[k][1]}`).join("\n");
+    // "guide" points at the best-matching page when there is one.
+    const links = { ...LINKS, ...(pages[0] && { guide: [`Guide: ${pages[0].title}`, pages[0].url] }) };
+    const linkText = d.links.map((k) => `${links[k][0]}: ${links[k][1]}`).join("\n");
     // Strip any URL the model wrote itself that isn't one of ours.
-    const safe = d.reply.replace(/https?:\/\/\S+/g, (u) => (Object.values(LINKS).some(([, l]) => u.startsWith(l)) ? u : ""));
+    const safe = d.reply.replace(/https?:\/\/\S+/g, (u) => (Object.values(links).some(([, l]) => u.startsWith(l)) ? u : ""));
     const text = [safe, linkText, "Maestro Pro Support\n(This reply was written by an AI assistant. If you need a person, just reply to this email and Toby will read it.)"].filter(Boolean).join("\n\n");
 
     const r = await send({
