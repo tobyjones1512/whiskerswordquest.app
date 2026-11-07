@@ -1,8 +1,14 @@
 // Relays website feedback to the Fider board. The Fider key lives only in the
 // FIDER_API_KEY environment variable of this Vercel project, never in the site or the repo.
 const FIDER = "https://thecaffeinemediacompany.fider.io";
-const APP_TAG = "whiskers-word-quest";
-const ORIGINS = ["https://whiskerswordquest.app", "https://www.whiskerswordquest.app"];
+// Each site posts to the same board; the origin decides which app tag its posts get.
+const APP_TAGS = {
+  "https://whiskerswordquest.app": "whiskers-word-quest",
+  "https://www.whiskerswordquest.app": "whiskers-word-quest",
+  "https://maestro-pro.app": "maestro-pro",
+  "https://www.maestro-pro.app": "maestro-pro",
+};
+const ORIGINS = Object.keys(APP_TAGS);
 const TYPE_TAGS = { bug: "bug-report", feature: "feature-suggestion", other: "other" };
 
 const fider = (path, body) =>
@@ -36,7 +42,7 @@ export default async function handler(req, res) {
     const post = await r.json().catch(() => ({}));
     if (!r.ok || !post.number) return res.status(502).json({ error: post.errors?.[0]?.message || "The feedback board refused it." });
     // The post exists now, so a tagging failure doesn't fail the send.
-    await Promise.allSettled([APP_TAG, TYPE_TAGS[type]].map((s) => fider(`/api/v1/posts/${post.number}/tags/${s}`)));
+    await Promise.allSettled([APP_TAGS[origin], TYPE_TAGS[type]].map((s) => fider(`/api/v1/posts/${post.number}/tags/${s}`)));
     res.status(200).json({ ok: true });
   } catch {
     res.status(502).json({ error: "Couldn't reach the feedback board." });

@@ -1,0 +1,202 @@
+// Maestro Pro licence cancellation, from the support site. Two calls with the same body shape:
+//   { key, action: "check" }                       -> what would happen, and what it would cost or refund. Changes nothing.
+//   { key, action: "confirm", refund?, fee? }      -> does it (only if refund/fee still match what check said).
+// Rules, counted in days from the charge date of the first payment (day 0):
+//   day 0-7   refund not possible yet (the payment has not cleared): tell them the date to come back.
+//   day 8-14  refund every cleared payment, then cancel subscriptions, instalments and mandates.
+//   day 15+   no refund. Annual: cancel the subscription and the mandate; access runs to the end of the year paid for.
+//             Monthly: charge 1 month + 50% of the rest of the 12-month term through the mandate (amounts taken from the
+//             bills on GoCardless), then cancel subscriptions and instalments but KEEP the mandate.
+// Needs GOCARDLESS_ACCESS_TOKEN, LICENCE_SECRET, RESEND_API_KEY. GoCardless refunds must be enabled on the account.
+import { gc, parseStudentKey } from "./_gc.js";
+
+const ORIGINS = ["https://maestro-pro.app", "https://www.maestro-pro.app", "https://thecaffeinemediacompany.com", "https://www.thecaffeinemediacompany.com"];
+const TERM_MONTHS = 12;
+const DAY = 864e5;
+const BAD = ["failed", "cancelled", "customer_approval_denied", "charged_back"];
+const NOT_COLLECTED = ["pending_customer_approval", "pending_submission"]; // can still be cancelled
+const IN_FLIGHT = ["submitted", "confirmed", "paid_out"]; // collected or on its way
+const CLEARED = ["confirmed", "paid_out"]; // refundable
+const isMaestro = (x) => /maestro pro/i.test(x ?? "");
+const gbp = (p) => "£" + (p / 100).toFixed(2);
+const dateStr = (ms) => new Date(ms).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" });
+const midnight = (ms) => Math.floor(ms / DAY) * DAY;
+const addMonths = (ms, n) => { const d = new Date(ms); d.setUTCMonth(d.getUTCMonth() + n); return d.getTime(); };
+const fail = (status, error) => Object.assign(new Error(error), { status });
+
+async function all(path, key) {
+  const out = [];
+  let after = "";
+  for (let page = 0; page < 10; page++) {
+    const r = (await gc("GET", `${path}${path.includes("?") ? "&" : "?"}limit=500${after && `&after=${after}`}`)).data;
+    out.push(...(r[key] || []));
+    after = r.meta?.cursors?.after;
+    if (!after) break;
+  }
+  return out;
+}
+
+/** Everything about this customer's Maestro Pro licence, and the outcome the rules give today. */
+async function assess(customerId, now = Date.now()) {
+  const customer = (await gc("GET", `/customers/${customerId}`)).data.customers;
+  if (!customer) throw fail(404, "We can't find that licence.");
+  const [subsAll, schedsAll, pays, mandates] = await Promise.all([
+    all(`/subscriptions?customer=${customerId}`, "subscriptions"),
+    all(`/instalment_schedules?customer=${customerId}`, "instalment_schedules"),
+    all(`/payments?customer=${customerId}`, "payments"),
+    all(`/mandates?customer=${customerId}`, "mandates"),
+  ]);
+  const subs = subsAll.filter((s) => isMaestro(s.name));
+  const scheds = schedsAll.filter((s) => isMaestro(s.name));
+  const subIds = new Set(subs.map((s) => s.id)), schedIds = new Set(scheds.map((s) => s.id));
+  const plan = pays
+    .filter((p) => !p.metadata?.cancellation_fee && (subIds.has(p.links?.subscription) || schedIds.has(p.links?.instalment_schedule) || isMaestro(p.description)))
+    .sort((a, b) => Date.parse(a.charge_date) - Date.parse(b.charge_date));
+  const valid = plan.filter((p) => !BAD.includes(p.status));
+
+  const activeSubs = subs.filter((s) => ["active", "pending_customer_approval"].includes(s.status));
+  const activeScheds = scheds.filter((s) => ["pending", "active"].includes(s.status));
+  const pending = valid.filter((p) => NOT_COLLECTED.includes(p.status));
+  const mandateIds = new Set([...subs, ...scheds].map((x) => x.links?.mandate).concat(plan.map((p) => p.links?.mandate)).filter(Boolean));
+  const activeMandates = mandates.filter((m) => mandateIds.has(m.id) && ["pending_customer_approval", "pending_submission", "submitted", "active"].includes(m.status));
+
+  const base = { customer, activeSubs, activeScheds, pending, activeMandates, valid };
+  if (!valid.length && !activeSubs.length && !activeScheds.length && !activeMandates.length) throw fail(404, "We can't find a Maestro Pro payment or plan for that licence key.");
+  if (!activeSubs.length && !activeScheds.length && !pending.length && !activeMandates.length) return { ...base, outcome: "already_cancelled" };
+
+  const monthly =
+    activeSubs.some((s) => s.interval_unit === "monthly" && (s.interval ?? 1) === 1) ||
+    scheds.some((s) => {
+      const ps = valid.filter((p) => p.links?.instalment_schedule === s.id);
+      return ps.length > 1 && Date.parse(ps[1].charge_date) - Date.parse(ps[0].charge_date) < 60 * DAY;
+    });
+  base.monthly = monthly;
+
+  if (!valid.length) return { ...base, outcome: "cancel", fee: 0, refund: 0, accessUntil: midnight(now), note: "No payment has been taken." };
+
+  const start = Date.parse(valid[0].charge_date);
+  const day = Math.floor((midnight(now) - start) / DAY);
+  base.start = start; base.day = day;
+
+  if (day <= 7) return { ...base, outcome: "too_early", retryOn: start + 8 * DAY };
+
+  if (day <= 14) {
+    const refundable = valid.filter((p) => CLEARED.includes(p.status) && p.amount - (p.amount_refunded || 0) > 0);
+    if (!refundable.length && valid.some((p) => p.status === "submitted")) return { ...base, outcome: "not_cleared", retryOn: midnight(now) + DAY };
+    const refund = refundable.reduce((t, p) => t + p.amount - (p.amount_refunded || 0), 0);
+    return { ...base, outcome: "refund", refundable, refund, fee: 0, accessUntil: midnight(now) };
+  }
+
+  if (!monthly) {
+    const last = valid.filter((p) => IN_FLIGHT.includes(p.status)).pop() || valid[0];
+    return { ...base, outcome: "cancel", fee: 0, refund: 0, accessUntil: Math.max(midnight(now), addMonths(Date.parse(last.charge_date), 12)) };
+  }
+
+  // Monthly after day 14: 1 month + 50% of what is left of the 12-month term.
+  const done = valid.filter((p) => IN_FLIGHT.includes(p.status));
+  const left = Math.max(0, TERM_MONTHS - done.length);
+  const unit = activeSubs.find((s) => s.interval_unit === "monthly")?.amount ?? (done[done.length - 1] || pending[0] || valid[valid.length - 1]).amount;
+  const bills = pending.slice().sort((a, b) => Date.parse(a.charge_date) - Date.parse(b.charge_date)).map((p) => p.amount).slice(0, left);
+  while (bills.length < left) bills.push(unit);
+  const fee = left ? bills[0] + Math.round(bills.slice(1).reduce((t, x) => t + x, 0) / 2) : 0;
+  return { ...base, outcome: fee ? "fee" : "cancel", fee, refund: 0, monthsLeft: left, accessUntil: midnight(addMonths(now, fee ? 1 : 0)) };
+}
+
+const describe = (a) => {
+  switch (a.outcome) {
+    case "already_cancelled": return "This licence has already been cancelled. There is nothing left to cancel.";
+    case "too_early": return `Your first payment was taken on ${dateStr(a.start)}. Refunds can only be issued once a payment has cleared, which takes up to a week. Please try again on ${dateStr(a.retryOn)}, the 8th day after your payment, and we will refund it then.`;
+    case "not_cleared": return "Your payment is still on its way through the banks, so it can't be refunded yet. Please try again tomorrow.";
+    case "refund": return `You are within the 14-day guarantee. We will refund ${gbp(a.refund)} to your bank account and cancel your licence, including any subscription, instalments and Direct Debit mandate. Your key will stop working today.`;
+    case "cancel": return a.monthly || !a.valid.length ? "We will cancel your licence." : `The 14-day refund period has ended (it ran for 14 days from ${dateStr(a.start)}), so we can't refund this payment. We can stop it renewing: we will cancel your subscription and Direct Debit mandate, and your licence key will keep working until ${dateStr(a.accessUntil)}, the end of the year you paid for.`;
+    case "fee": return `The 14-day refund period has ended, so we can't refund your payments. We can cancel your subscription going forward. Because you pay monthly on a ${TERM_MONTHS}-month contract, ending it early costs one month plus half of the remaining term: ${gbp(a.fee)}. We will collect it from your bank by Direct Debit, using the mandate you already have, then cancel your remaining payments. Your Direct Debit mandate stays in place. Your key will keep working until ${dateStr(a.accessUntil)}.`;
+  }
+};
+
+const post = (path, body, idem) => gc("POST", path, body ?? {}, idem);
+const conflict = (r) => r.data.error?.errors?.some((e) => e.reason === "idempotent_creation_conflict");
+
+async function execute(a, customerId, now = Date.now()) {
+  const idemBase = `maestro-cancel-${customerId}`;
+  // 1. Money first, so a failure leaves the licence untouched.
+  if (a.outcome === "refund") {
+    for (const p of a.refundable) {
+      const amount = p.amount - (p.amount_refunded || 0);
+      const r = await post("/refunds", { refunds: { amount, total_amount_confirmation: p.amount, links: { payment: p.id }, metadata: { reason: "maestro_14_day_guarantee" } } }, `maestro-refund-${p.id}`);
+      if (r.status >= 300 && !conflict(r)) throw fail(502, "We couldn't process the refund automatically. Nothing has been cancelled. Please email hello@thecaffeinemediacompany.com and it will be sorted by hand.");
+    }
+  } else if (a.outcome === "fee") {
+    const mandate = [...a.activeSubs, ...a.activeScheds].map((x) => x.links?.mandate).find((m) => a.activeMandates.some((am) => am.id === m)) || a.activeMandates[0]?.id;
+    if (!mandate) throw fail(409, "We couldn't find an active Direct Debit mandate to collect the cancellation fee. Please email hello@thecaffeinemediacompany.com.");
+    const r = await post("/payments", { payments: { amount: a.fee, currency: "GBP", description: "Maestro Pro early cancellation fee", links: { mandate }, metadata: { cancellation_fee: "true" } } },
+      `${idemBase}-fee-${[...a.activeSubs, ...a.activeScheds].map((x) => x.id).join("-")}`);
+    if (r.status >= 300 && !conflict(r)) throw fail(502, "We couldn't collect the cancellation fee, so nothing has been cancelled. Please email hello@thecaffeinemediacompany.com.");
+  }
+  // 2. Stop future payments.
+  const steps = [
+    ...a.activeSubs.map((s) => post(`/subscriptions/${s.id}/actions/cancel`)),
+    ...a.activeScheds.map((s) => post(`/instalment_schedules/${s.id}/actions/cancel`)),
+  ];
+  const results = await Promise.all(steps);
+  if (results.some((r) => r.status >= 300 && r.data.error?.errors?.[0]?.reason !== "cancellation_failed")) throw fail(502, "Your payment was handled but we couldn't cancel everything. Please email hello@thecaffeinemediacompany.com and quote your licence key.");
+  await Promise.all(a.pending.map((p) => post(`/payments/${p.id}/actions/cancel`))); // may already be cancelled with its plan
+  // 3. Mandates: cancelled unless a monthly customer is paying the early-cancellation fee, who keeps theirs.
+  if (a.outcome !== "fee") await Promise.all(a.activeMandates.map((m) => post(`/mandates/${m.id}/actions/cancel`)));
+  // 4. The key stops working at accessUntil (studentHasPaid reads this).
+  await gc("PUT", `/customers/${customerId}`, { customers: { metadata: { ...(a.customer.metadata || {}), maestro_access_until: new Date(a.accessUntil).toISOString() } } });
+}
+
+async function notify(a, summary) {
+  const to = a.customer?.email;
+  if (!to || !process.env.RESEND_API_KEY) return;
+  const note = "This inbox is not monitored, so please do not reply to this email.";
+  await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      from: process.env.CONTACT_FROM || "Maestro Pro <noreply@thecaffeinemediacompany.com>",
+      to: [to],
+      subject: "Your Maestro Pro licence has been cancelled",
+      text: `${summary}\n\nIf you didn't ask for this, email hello@thecaffeinemediacompany.com.\n\n${note}`,
+      html: `<p>${summary}</p><p>If you didn't ask for this, email hello@thecaffeinemediacompany.com.</p><p>${note}</p>`,
+    }),
+  }).catch(() => {});
+}
+
+export default async function handler(req, res) {
+  const origin = req.headers.origin;
+  if (ORIGINS.includes(origin)) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Vary", "Origin");
+  }
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  if (req.method === "OPTIONS") return res.status(204).end();
+  if (req.method !== "POST") return res.status(405).json({ error: "POST only." });
+  if (!ORIGINS.includes(origin)) return res.status(403).json({ error: "Not allowed." });
+
+  const { key, action, refund, fee } = req.body || {};
+  const customerId = parseStudentKey(key);
+  if (!customerId) return res.status(400).json({ error: "That licence key isn't valid. Check it and try again." });
+  if (action !== "check" && action !== "confirm") return res.status(400).json({ error: "Unknown action." });
+
+  try {
+    const a = await assess(customerId);
+    const view = { outcome: a.outcome, message: describe(a), refund: a.refund || 0, fee: a.fee || 0, retryOn: a.retryOn ? dateStr(a.retryOn) : undefined };
+    if (action === "check") return res.status(200).json({ ok: true, ...view, canConfirm: ["refund", "cancel", "fee"].includes(a.outcome) });
+
+    if (!["refund", "cancel", "fee"].includes(a.outcome)) return res.status(200).json({ ok: true, done: false, ...view });
+    // Refuse if the amounts moved since the customer read them (a day boundary, a new payment).
+    if (Number(refund || 0) !== view.refund || Number(fee || 0) !== view.fee) return res.status(409).json({ error: "Your account changed while you were reading this. Please start again." });
+    await execute(a, customerId);
+    const msg = a.outcome === "refund" ? `We have refunded ${gbp(a.refund)}, which should reach your bank in a few working days, and cancelled your licence.`
+      : a.outcome === "fee" ? `We have collected the ${gbp(a.fee)} cancellation fee and cancelled your remaining monthly payments. Your licence key will work until ${dateStr(a.accessUntil)}.`
+      : a.monthly ? "Your licence has been cancelled." : `Your subscription and Direct Debit mandate are cancelled. Your licence key will work until ${dateStr(a.accessUntil)}.`;
+    await notify(a, msg);
+    res.status(200).json({ ok: true, done: true, outcome: a.outcome, message: msg });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error(err);
+    res.status(502).json({ error: "Couldn't reach the payment service. Try again in a moment." });
+  }
+}
