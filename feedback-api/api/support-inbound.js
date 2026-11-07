@@ -11,22 +11,28 @@
 //   REPLY_DELAY             optional "on": send each reply 10 to 45 minutes after the email arrives (default: reply straight away).
 //   AI_NOTICE_UNKNOWN       optional "1": also show the AI notice when the sender's country can't be told (default: only for EU senders).
 //   SUPPORT_FROM            optional, default "Maestro Pro Support <support@maestro-pro.app>".
+//   BLOB_READ_WRITE_TOKEN   added by connecting a Vercel Blob store to the project; keeps every email chain for the escalations desk
+//                           (BLOB_ACCESS = "private", the default, or "public", to match the store). Without it the bot works as before.
+//   ADMIN_PASSWORD          the password for the desk page (api/support-admin.js). ESCALATIONS_FROM optional, default "Maestro Pro Escalations <escalations@maestro-pro.app>".
 import crypto from "node:crypto";
 import { gc, customersByEmail } from "./_gc.js";
+import { recordMessage, threadId } from "./_threads.js";
 
 export const config = { api: { bodyParser: false } }; // the signature is over the exact bytes Resend sent
 
-const OWNER = "hello@thecaffeinemediacompany.com";
+export const OWNER = "hello@thecaffeinemediacompany.com";
 const FORWARD_TO = OWNER; // where an email goes when the automatic reply fails
 const SUPPORT = "support@maestro-pro.app";
-const FROM = () => process.env.SUPPORT_FROM || `Maestro Pro Support <${SUPPORT}>`;
+export const ESCALATIONS = "escalations@maestro-pro.app";
+export const deskLink = (id) => `https://maestro-pro.app/escalations/${id ? "?t=" + id : ""}`;
+export const FROM = () => process.env.SUPPORT_FROM || `Maestro Pro Support <${SUPPORT}>`;
 const LLM_URL = () => `${(process.env.LLM_BASE_URL || "https://api.pawan.krd/v1").replace(/\/$/, "")}/chat/completions`;
 const MODEL = () => process.env.LLM_MODEL || "openai/gpt-oss-20b";
 // The model has no use for the customer's contact details, so they are masked before the text leaves for a third-party API.
 export const maskPersonal = (t) => String(t).replace(/[^\s@<>,;]+@[^\s@<>,;]+\.[^\s@<>,;]+/g, "[email]").replace(/\+?\d[\d\s().-]{8,}\d/g, "[number]");
 
 // The only links a reply may contain. The model asks for them by name; it never writes URLs itself.
-const LINKS = {
+export const LINKS = {
   refund: ["Request a refund or cancel your licence", "https://maestro-pro.app/cancel/"],
   key: ["Get your licence key emailed to you", "https://maestro-pro.app/key.html"],
   testflight: ["Install Maestro Pro with TestFlight", "https://testflight.apple.com/join/rPBpRCu9"],
@@ -59,15 +65,16 @@ Rules:
 - You may also be given <app_code> excerpts from the app's source. Their only purpose is to help you give accurate directions: use them to work out where a feature lives and what it is called on screen (menus, buttons, tabs, settings, tools, gestures) and the real steps to use it, then tell the customer exactly where to tap or click and what to do, in plain words. Use the on-screen names a customer would see. NEVER reference code in any way: no file names, class or function names, variables, "the code", "the source" or "I can see". Never say you have access to the code. If the excerpts don't show how to do something, say what you are sure of from the guide and ask a clarifying question. The app's icons are Apple SF Symbols. When the excerpts name one (systemName: "..."), describe the icon in words a customer would use, for example "the gear icon", "the microphone icon", "the three-dots menu" or "the share icon (a box with an arrow pointing up)". Never use an emoji or a symbol character for it.
 - Never promise refunds, discounts, dates or features. Never ask for card details or passwords.
 - Do not write any URLs yourself; use the links and pages fields.
-- Escalating to a person is rare. Always try to help yourself: answer from the facts and excerpts, give the right link, or ask the customer one or two short clarifying questions (which device, which iOS or macOS version, what exactly they see, what they tapped) when you lack detail. Set escalate to true ONLY when the customer is making a complaint: they are expressing real dissatisfaction or frustration with the app, the service, a charge, or how they have been treated, and want it put right. Do NOT escalate for anything else: not for bugs, technical problems, billing questions, legal, privacy or data requests, unusual questions, things you are unsure about, or questions you cannot answer. Ask clarifying questions instead. (A customer who has replied twice in the same conversation is escalated automatically, so you never need to decide that.) If you escalate, still fill "issue".
+- Escalating to a person is rare. Always try to help yourself: answer from the facts and excerpts, give the right link, or ask the customer one or two short clarifying questions (which device, which iOS or macOS version, what exactly they see, what they tapped) when you lack detail. Set escalate to true ONLY when the customer is making a complaint: they are expressing real dissatisfaction or frustration with the app, the service, a charge, or how they have been treated, and want it put right. Do NOT escalate for anything else: not for bugs, technical problems, billing questions, legal, privacy or data requests, unusual questions, things you are unsure about, or questions you cannot answer. Ask clarifying questions instead. (A customer who has replied twice in the same conversation is escalated automatically, except on refund, licence key and TestFlight questions, so you never need to decide that.) If you escalate, still fill "issue".
+- Set refund_problem to true ONLY when the customer says a refund has not come through, has not arrived yet, or is wrong in some way (wrong amount, taken twice, charged after cancelling). A customer who is simply asking how to get a refund or cancel is NOT a refund problem: send them to the cancellation page. Otherwise leave refund_problem false.
 - "issue" (base it on the whole conversation) is a short lower-case phrase that finishes the sentence "I'm sorry to hear ...", for example "that the tuner can't hear you" or "you can't access your account". No full stop, no URLs, under 100 characters. It is only used if you escalate.
-Reply with only JSON: {"reply": string, "pages": string[], "links": string[], "escalate": boolean, "issue": string, "evidence": "guide" | "code" | "facts" | "none"}. "evidence" is where your answer came from ("none" only if you made no claim about the app). Allowed links: ${Object.keys(LINKS).join(", ")}.`;
+Reply with only JSON: {"reply": string, "pages": string[], "links": string[], "escalate": boolean, "refund_problem": boolean, "issue": string, "evidence": "guide" | "code" | "facts" | "none"}. "evidence" is where your answer came from ("none" only if you made no claim about the app). Allowed links: ${Object.keys(LINKS).join(", ")}.`;
 
 // ---- Reference material: the guide's tree (guide/tree.json) and Markdown pages (guide/<slug>.md) on the website, cached for an hour.
 // Pages are picked by matching the email against each page's title, keywords and summary, so only a few short pages are sent to the model.
 const SITE = "https://maestro-pro.app";
 let treeCache = { at: 0, pages: [], groups: [] };
-async function guideTree() {
+export async function guideTree() {
   if (treeCache.pages.length && Date.now() - treeCache.at < 3600e3) return treeCache;
   try {
     const [t, idx] = await Promise.all([fetch(`${SITE}/guide/tree.json`).then((r) => r.json()), fetch(`${SITE}/guide/search.json`).then((r) => r.json()).catch(() => ({}))]);
@@ -179,7 +186,7 @@ export function verifySignature(raw, headers, secret, now = Date.now()) {
   });
 }
 
-const addr = (s) => (/<([^>]+)>/.exec(String(s ?? "")) || [, String(s ?? "")])[1].trim().toLowerCase();
+export const addr = (s) => (/<([^>]+)>/.exec(String(s ?? "")) || [, String(s ?? "")])[1].trim().toLowerCase();
 
 /** Mail we must never answer: our own addresses, robots, mailing lists and auto-replies (so two auto-responders can't loop). */
 export function shouldIgnore(from, headers = {}) {
@@ -239,7 +246,7 @@ const SIGNOFF = "Best regards,\nMaestro Pro Support";
 /** Drops a greeting or sign-off the model wrote despite being told not to, so ours is the only one. */
 export const trimModelFraming = (t) => String(t).replace(/^\s*(hi|hello|hey|dear)\b[^\n]*\n+/i, "").replace(/\n+\s*(best regards|kind regards|regards|best wishes|many thanks|thanks|cheers|yours sincerely|sincerely)\b[\s\S]*$/i, "").trim();
 
-const esc = (x) => String(x).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+export const esc = (x) => String(x).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 
 // ---- Email design. Table layout and inline styles, because that is what mail apps render reliably. Colours match the website.
 const C = { walnut: "#15100B", amber: "#F6A828", deep: "#B86F00", paper: "#FFFDF7", cream: "#EFE8D6", card: "#FBF6E8", ink: "#1B140D", muted: "#6B5F4D", rule: "#E6DCC3", foot: "#F6F0E1" };
@@ -279,11 +286,11 @@ function inlineText(t, resolve, used) {
     return `${txt} (${url})`;
   });
 }
-const firstSentence = (s) => { const m = /^(.{20,160}?[.!?])(\s|$)/.exec(String(s)); return m ? m[1] : String(s).slice(0, 140); };
+export const firstSentence = (s) => { const m = /^(.{20,160}?[.!?])(\s|$)/.exec(String(s)); return m ? m[1] : String(s).slice(0, 140); };
 
 /** Builds the customer's email, HTML and plain text, from the model's reply. Links inside the reply are written [text](target) and every
  *  target is checked by `resolve`; the model never supplies a URL. `buttons` are [label, url] actions, `guides` are {title, url, summary}. */
-export function buildEmail({ name, reply, buttons = [], guides = [], aiNotice = false, resolve = () => null }) {
+export function buildEmail({ name, reply, buttons = [], guides = [], aiNotice = false, resolve = () => null, label = "Support", contact = SUPPORT }) {
   const blocks = parseBlocks(reply), used = new Set(), hi = `Hi ${name || "there"},`;
   const text = (t) => inlineText(t, resolve, new Set());
   // ----- html body
@@ -299,19 +306,19 @@ export function buildEmail({ name, reply, buttons = [], guides = [], aiNotice = 
   const guidesHtml = gds.length ? `<div style="margin:10px 0 6px;font:700 11px ${FONT};letter-spacing:.09em;text-transform:uppercase;color:${C.muted}" class="muted">Helpful guides</div>${gds.map((g) =>
     `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" class="guide" style="margin:0 0 10px;border:1px solid ${C.rule};border-radius:10px;background:${C.card}"><tr><td style="padding:12px 16px"><div class="muted" style="font:700 10px ${FONT};letter-spacing:.09em;text-transform:uppercase;color:${C.muted}">Guide</div><a href="${esc(g.url)}" class="lnk" style="font:700 18px/1.3 ${SERIF};${"color:" + C.deep};text-decoration:underline">${esc(g.title)}</a>${g.summary ? `<div class="muted" style="margin-top:3px;font:14px/1.5 ${FONT};color:${C.muted}">${esc(g.summary)}</div>` : ""}</td></tr></table>`).join("")}` : "";
   const preheader = esc(String(reply).replace(/\[([^\]]+)\]\([^)]*\)/g, "$1").replace(/\*\*/g, "").replace(/\s+/g, " ").slice(0, 110));
-  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><meta name="supported-color-schemes" content="light dark"><title>Maestro Pro Support</title>
+  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><meta name="supported-color-schemes" content="light dark"><title>Maestro Pro ${label}</title>
 <style>@media (max-width:620px){.card{padding:24px 20px !important}.wrap{padding:12px 6px !important}}@media (prefers-color-scheme:dark){.bg{background:#0F0B07 !important}.card{background:#1E1710 !important}.ink,.card p,.card li,.card td{color:#F3EBDA !important}.muted{color:#CDB991 !important}.lnk{color:#F6A828 !important}.guide{background:#2A2017 !important;border-color:#4A3B2B !important}.foot{background:#15100B !important;color:#9C8B6C !important}.foot a,.foot div{color:#9C8B6C !important}}</style></head>
 <body class="bg" style="margin:0;padding:0;background:${C.cream}"><div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent">${preheader}</div>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" class="bg" style="background:${C.cream}"><tr><td align="center" class="wrap" style="padding:28px 12px">
 <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:600px">
-<tr><td style="background:${C.walnut};border-radius:14px 14px 0 0;padding:18px 28px"><table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%"><tr><td width="46" valign="middle"><img src="https://maestro-pro.app/assets/app-icon-160.png" width="38" height="38" alt="" style="display:block;border-radius:9px"></td><td valign="middle" style="font:700 21px ${SERIF};color:#F3EBDA">Maestro Pro</td><td align="right" valign="middle" style="font:700 11px ${FONT};letter-spacing:.1em;text-transform:uppercase;color:#CDB991">Support</td></tr></table></td></tr>
+<tr><td style="background:${C.walnut};border-radius:14px 14px 0 0;padding:18px 28px"><table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%"><tr><td width="46" valign="middle"><img src="https://maestro-pro.app/assets/app-icon-160.png" width="38" height="38" alt="" style="display:block;border-radius:9px"></td><td valign="middle" style="font:700 21px ${SERIF};color:#F3EBDA">Maestro Pro</td><td align="right" valign="middle" style="font:700 11px ${FONT};letter-spacing:.1em;text-transform:uppercase;color:#CDB991">${esc(label)}</td></tr></table></td></tr>
 <tr><td style="height:4px;background:${C.amber};font-size:0;line-height:0">&nbsp;</td></tr>
 <tr><td class="card" style="background:${C.paper};padding:32px 34px 30px;font:16px/1.6 ${FONT};color:${C.ink}">
 <p class="ink" style="margin:0 0 18px;font:700 22px/1.3 ${SERIF};color:${C.ink}">${esc(hi)}</p>
 ${body}${buttonsHtml}${guidesHtml}
 <p class="ink" style="margin:26px 0 0;font:16px/1.5 ${FONT};color:${C.ink}">Best regards,<br><strong>Maestro Pro Support</strong></p>
 </td></tr>
-<tr><td class="foot" style="background:${C.foot};border-radius:0 0 14px 14px;padding:18px 34px;font:12px/1.5 ${FONT};color:#7A6E5B">Maestro Pro, made by Toby Jones &middot; <a href="https://maestro-pro.app/" style="color:#7A6E5B">maestro-pro.app</a> &middot; <a href="mailto:support@maestro-pro.app" style="color:#7A6E5B">support@maestro-pro.app</a>${aiNotice ? `<div style="margin-top:8px;font-size:10px;line-height:1.3;color:#8A8070">${AI_NOTICE}</div>` : ""}</td></tr>
+<tr><td class="foot" style="background:${C.foot};border-radius:0 0 14px 14px;padding:18px 34px;font:12px/1.5 ${FONT};color:#7A6E5B">Maestro Pro, made by Toby Jones &middot; <a href="https://maestro-pro.app/" style="color:#7A6E5B">maestro-pro.app</a> &middot; <a href="mailto:${contact}" style="color:#7A6E5B">${contact}</a>${aiNotice ? `<div style="margin-top:8px;font-size:10px;line-height:1.3;color:#8A8070">${AI_NOTICE}</div>` : ""}</td></tr>
 </table></td></tr></table></body></html>`;
   // ----- plain text
   const parts = [hi, ...blocks.map((b) => (b.type === "steps" ? b.items.map((l, i) => `${i + 1}. ${text(l)}`).join("\n") : b.type === "bullets" ? b.items.map((l) => `- ${text(l)}`).join("\n") : b.items.map(text).join("\n"))),
@@ -410,13 +417,26 @@ export function signoffsQuoted(e = {}) {
   return (t.match(/best regards,[\s>]*maestro pro support/gi) || []).length;
 }
 
+/** A customer saying their refund has not come through, or is wrong. Checked on the new email only (not the quoted history). */
+export const REFUND_PROBLEM = /\b(?:my|the|a)\s+refund\b[^.\n]{0,60}\b(?:not|hasn'?t|haven'?t|yet|still|never|missing|wrong|incorrect|short|late|delayed|twice)\b|\b(?:still|not|haven'?t|hasn'?t|never|yet to)\b[^.\n]{0,40}\b(?:receiv\w*|got|seen)\b[^.\n]{0,15}\b(?:my|the|a)\s+refund\b|\brefund\b[^.\n]{0,40}\b(?:wrong amount|too (?:little|much)|not (?:the )?(?:right|correct) amount)\b/i;
+/** Who gets escalated. Refund, key and TestFlight questions always have an answer (a link), so the second-reply and complaint rules skip them;
+ *  a refund that has not come through or is wrong goes to a person at once. Any other chain escalates for a complaint or a second reply. */
+const EXEMPT_TOPIC = /\b(?:refunds?|refunded|cancel(?:l?ation|l?ing|l?ed)?|licen[cs]e key|(?:lost|forgot|find|resend)\w*\s+(?:my\s+|the\s+)?key|testflight)\b/i;
+export function shouldEscalate({ replies = 0, complaint = false, links = [], refundProblem = false, text = "" }) {
+  if (refundProblem) return { escalate: true, reason: "Refund problem" };
+  if (links.some((k) => ["refund", "key", "testflight"].includes(k)) || EXEMPT_TOPIC.test(text)) return { escalate: false };
+  if (replies >= 2) return { escalate: true, reason: "Customer has replied twice" };
+  if (complaint) return { escalate: true, reason: "Complaint" };
+  return { escalate: false };
+}
+
 /** The quoted earlier messages in a reply, for context (the main body strips them). */
 const quoted = (e) => {
   const t = e.text || "";
   return t.split("\n").filter((l) => l.trim().startsWith(">")).map((l) => l.replace(/^[>\s]+/, "")).join("\n").replace(/\n{3,}/g, "\n\n").trim().slice(0, 1500);
 };
 
-const plain = (e) => {
+export const plain = (e) => {
   let t = e.text || String(e.html || "").replace(/<(style|script)[\s\S]*?<\/\1>/gi, " ").replace(/<br\s*\/?>|<\/p>/gi, "\n").replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&");
   t = t.split("\n").filter((l) => !l.trim().startsWith(">")).join("\n").replace(/\n{3,}/g, "\n\n").trim();
   return t.slice(0, 3000);
@@ -441,10 +461,10 @@ async function draft(subject, body, guide = { top: [], outline: "" }, code = [],
   const content = (await r.json()).choices?.[0]?.message?.content || "";
   let j = {};
   try { j = JSON.parse(/\{[\s\S]*\}/.exec(content)?.[0] || "{}"); } catch { /* escalate below */ }
-  return { reply: String(j.reply || "").trim(), links: Array.isArray(j.links) ? j.links.filter((k) => LINKS[k]) : [], pages: Array.isArray(j.pages) ? j.pages.map(String) : [], escalate: j.escalate === true || !j.reply, evidence: String(j.evidence || ""), issue: String(j.issue || "").replace(/https?:\/\/\S+/g, "").replace(/\s+/g, " ").replace(/[.!]+$/, "").trim().slice(0, 100) };
+  return { reply: String(j.reply || "").trim(), links: Array.isArray(j.links) ? j.links.filter((k) => LINKS[k]) : [], pages: Array.isArray(j.pages) ? j.pages.map(String) : [], escalate: j.escalate === true || !j.reply, refundProblem: j.refund_problem === true, evidence: String(j.evidence || ""), issue: String(j.issue || "").replace(/https?:\/\/\S+/g, "").replace(/\s+/g, " ").replace(/[.!]+$/, "").trim().slice(0, 100) };
 }
 
-const send = (payload, idem) =>
+export const send = (payload, idem) =>
   fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}`, "Content-Type": "application/json", "Idempotency-Key": idem },
@@ -460,7 +480,9 @@ export default async function handler(req, res) {
   try { evt = JSON.parse(raw); } catch { return res.status(400).json({ error: "Bad JSON." }); }
   if (evt.type !== "email.received" || !evt.data?.email_id) return res.status(200).json({ ok: true, ignored: "event" });
   const id = evt.data.email_id;
-  if (![].concat(evt.data.to || []).some((t) => addr(t) === SUPPORT)) return res.status(200).json({ ok: true, ignored: "recipient" });
+  const to = [].concat(evt.data.to || []).map(addr);
+  if (to.includes(ESCALATIONS) && !to.includes(SUPPORT)) return deskInbound(evt, res);
+  if (!to.includes(SUPPORT)) return res.status(200).json({ ok: true, ignored: "recipient" });
 
   const ctx = { from: evt.data.from || "", subject: evt.data.subject || "(no subject)", body: "" }; // what we can forward if anything fails
   try {
@@ -496,11 +518,10 @@ export default async function handler(req, res) {
     const allowedUrls = [...Object.values(LINKS).map(([, u]) => u), ...[...guide.known.values()].map((g) => g.url)];
     // A link in the model's text is [text](target); the target is only ever one of our own links or a real guide page.
     const resolve = (t) => LINKS[String(t).trim()]?.[1] || guide.known.get(String(t).trim())?.url || (allowedUrls.includes(String(t).trim()) ? String(t).trim() : null);
-    // Escalation happens only for a complaint (the model sets escalate only for those) or once the customer has replied twice.
-    // Refund, key and TestFlight questions always have an answer (a link), so they are never escalated on the complaint route.
-    // A customer who has now replied twice is escalated whatever the topic.
-    const repeat = replies >= 2;
-    const escalate = repeat || (d.escalate && !d.links.some((k) => ["refund", "key", "testflight"].includes(k)));
+    // Escalation: a complaint, a second customer reply, or a refund that has not come through. Refund, key and TestFlight questions are exempt from
+    // the first two (they always have an answer, a link), but a refund problem goes to a person straight away. See shouldEscalate.
+    const verdict = shouldEscalate({ replies, complaint: d.escalate, links: d.links, refundProblem: d.refundProblem || REFUND_PROBLEM.test(body), text: `${subject}\n${body}\n${earlier}` });
+    const escalate = verdict.escalate;
     const buttons = escalate ? [] : d.links.map((k) => LINKS[k]), guideCards = escalate ? [] : pagePairs;
     // Strip any URL the model wrote itself that isn't one of ours, and any greeting/sign-off of its own.
     const holding = noDashes(noEmoji(`I’m sorry to hear ${d.issue || "that you’ve run into a problem"}. I will escalate the issue and someone will get back to you shortly.`));
@@ -513,7 +534,7 @@ export default async function handler(req, res) {
     const { text, html } = buildEmail({ name, reply: inlineReply, buttons, guides: guideCards, aiNotice, resolve });
 
     const r = await send({
-      from: FROM(), to: [addr(from)], reply_to: SUPPORT,
+      from: FROM(), to: [addr(from)], reply_to: escalate ? ESCALATIONS : SUPPORT,   // once escalated, the customer's next email goes to the desk
       subject: /^re:/i.test(subject) ? subject : `Re: ${subject}`,
       text, html,
       ...(process.env.REPLY_DELAY === "on" && { scheduled_at: replyTime() }),   // off for now; set REPLY_DELAY=on for a 10 to 45 minute pause
@@ -521,11 +542,18 @@ export default async function handler(req, res) {
     }, `support-reply-${id}`);
     if (!r.ok) throw new Error("Resend " + r.status);
 
+    // Keep the chain for the desk (the page at /escalations/). A storage problem must never stop the reply or the escalation notice.
+    const at = new Date().toISOString(), tid = threadId(addr(from), subject);
+    try {
+      await recordMessage({ customer: addr(from), name, subject, message: { key: id, dir: "in", by: "customer", at, text: body, msgId } });
+      await recordMessage({ customer: addr(from), name, subject, message: { key: `bot-${id}`, dir: "out", by: "bot", at: new Date().toISOString(), text }, escalate: escalate ? { reason: verdict.reason } : undefined });
+    } catch (e) { console.error("thread store", e?.message); }
+
     if (escalate) {
       await send({
         from: FROM(), to: [OWNER], reply_to: addr(from),
-        subject: `Support needs you: ${subject}`,
-        text: `${repeat ? "Escalated because the customer has replied twice.\n\n" : ""}From: ${from}\nSubject: ${subject}\n\n${body}\n\n---\nThe assistant told the customer it was escalating, and said:\n${safe}`,
+        subject: `Escalation raised: ${subject}`,
+        text: `An escalation has been raised (${verdict.reason.toLowerCase()}).\n\nOpen it and reply: ${deskLink(tid)}\n\nFrom: ${from}\nSubject: ${subject}\n\n${body}\n\n---\nThe assistant told the customer it was escalating, and said:\n${safe}`,
       }, `support-escalate-${id}`).catch(() => {});
     }
     res.status(200).json({ ok: true, escalated: escalate });
@@ -538,6 +566,33 @@ export default async function handler(req, res) {
       subject: `Fwd: ${String(ctx.subject).replace(/[\r\n]+/g, " ").slice(0, 180)}`,
       text: `The automatic reply failed (${String(err.message).slice(0, 100)}), so this support email is forwarded for you to answer. Replying to this message goes to the customer.\n\nFrom: ${ctx.from}\nSubject: ${ctx.subject}\n\n${ctx.body || "(The message body couldn't be fetched. Open it in the Resend dashboard: email " + id + ".)"}`,
     }, `support-fwd-${id}`).catch(() => {});
+    if (addr(ctx.from)) await recordMessage({ customer: addr(ctx.from), name: firstName(ctx.from), subject: ctx.subject, message: { key: id, dir: "in", by: "customer", text: ctx.body }, escalate: { reason: "The automatic reply failed" } }).catch(() => {});
+    res.status(200).json({ ok: false });
+  }
+}
+
+/** An email sent straight to escalations@ (a customer replying to one of Toby's emails, or to a bot escalation). No automatic reply:
+ *  the chain is stored, reopened, and Toby is emailed a link to the desk. */
+async function deskInbound(evt, res) {
+  const id = evt.data.email_id;
+  try {
+    const full = await (await fetch(`https://api.resend.com/emails/receiving/${id}`, { headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}` } })).json();
+    const from = evt.data.from || full.from || "";
+    if (shouldIgnore(from, full.headers)) return res.status(200).json({ ok: true, ignored: "automated" });
+    const subject = String(evt.data.subject || full.subject || "(no subject)").replace(/[\r\n]+/g, " ").slice(0, 200), body = plain(full);
+    const tid = threadId(addr(from), subject);
+    try { await recordMessage({ customer: addr(from), name: firstName(from), subject, message: { key: id, dir: "in", by: "customer", text: body, msgId: evt.data.message_id || full.message_id }, escalate: { reason: "Customer wrote to the escalations address" } }); }
+    catch (e) { console.error("thread store", e?.message); }
+    await send({
+      from: FROM(), to: [OWNER], reply_to: addr(from),
+      subject: `Escalation raised: ${subject}`,
+      text: `An escalation has been raised.\n\nOpen it and reply: ${deskLink(tid)}\n\nFrom: ${from}\nSubject: ${subject}\n\n${body}`,
+    }, `support-desk-${id}`);
+    res.status(200).json({ ok: true, escalated: true });
+  } catch (err) {
+    console.error(err);
+    // Still tell Toby, with the raw email, so an escalation is never lost.
+    await send({ from: FROM(), to: [OWNER], subject: `Escalation raised: ${String(evt.data.subject || "(no subject)").slice(0, 180)}`, text: `An escalation has been raised, but it could not be read (${String(err.message).slice(0, 100)}). Open the desk: ${deskLink()}\n\nFrom: ${evt.data.from || ""}` }, `support-desk-fwd-${id}`).catch(() => {});
     res.status(200).json({ ok: false });
   }
 }
