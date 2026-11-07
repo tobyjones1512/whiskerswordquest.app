@@ -1,5 +1,5 @@
 // The escalations desk's API (the hidden page at https://maestro-pro.app/escalations/). Protected by one password, the ADMIN_PASSWORD
-// environment variable on Vercel, sent as "Authorization: Bearer <password>". Lists the stored email chains, opens one, sends Toby's reply
+// environment variable on Vercel, sent as "Authorization: Bearer <password>". Lists the stored email chains, opens one, sends the owner's reply
 // from escalations@maestro-pro.app in the same email design as the support bot, and sets a chain's status.
 import crypto from "node:crypto";
 import { buildEmail, guideTree, LINKS, send, firstSentence, ESCALATIONS, DEFAULT_PROMPT } from "./support-inbound.js";
@@ -61,7 +61,7 @@ export function authorised(header, password = process.env.ADMIN_PASSWORD) {
   return crypto.timingSafeEqual(sha(given), sha(password));
 }
 
-/** Link targets Toby may use in a reply: [text](https://...) for any web address, or a guide slug. Anything else keeps its text only. */
+/** Link targets the owner may use in a reply: [text](https://...) for any web address, or a guide slug. Anything else keeps its text only. */
 export const makeResolve = (known) => (t) => {
   const x = String(t).trim();
   return /^https:\/\/[^\s"<>]+$/.test(x) ? x : LINKS[x]?.[1] || known.get(x)?.url || null;

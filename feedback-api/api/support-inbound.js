@@ -1,6 +1,6 @@
 // Maestro Pro support inbox: Resend forwards each email sent to support@maestro-pro.app here (an "email.received" webhook).
 // A small model, reached through the Pawan.Krd OpenAI-compatible API, drafts a short reply, which is sent from the same address. Anything it can't
-// answer is passed to Toby instead. Environment variables on Vercel (never in the repo):
+// answer is passed to the owner instead. Environment variables on Vercel (never in the repo):
 //   LLM_API_KEY            key for the model API (a "pk-..." key from pawan.krd/keys).
 //   LLM_MODEL              optional model id (default openai/gpt-oss-20b). LLM_BASE_URL optional (default https://api.pawan.krd/v1).
 //   RESEND_API_KEY          already used by the other endpoints.
@@ -40,7 +40,7 @@ export const LINKS = {
 };
 
 /** The prompt the support bot starts from. The desk page can replace it; {{LINKS}} is filled in with the allowed link names. */
-export const DEFAULT_PROMPT = `You write replies for Maestro Pro customer support. Maestro Pro is a music-score app for iPhone, iPad and Mac made by one person, Toby Jones.
+export const DEFAULT_PROMPT = `You write replies for Maestro Pro customer support. Maestro Pro is a music-score app for iPhone, iPad and Mac made by Caffeine Media.
 Facts you may use, and nothing else about the product:
 - Professional can be bought on the website: £10 a month on a 12-month contract, or £89 a year. Performer is a subscription started inside the app, managed in the customer's Apple Account.
 - A licence key is emailed to the address that paid. The app asks for it under "Already have a licence key?" on the paywall.
@@ -324,7 +324,7 @@ ${body}${buttonsHtml}${guidesHtml}
 <p class="ink" style="margin:26px 0 0;font:16px/1.5 ${FONT};color:${C.ink}">Best regards,<br><strong>${esc(signoff)}</strong></p>${caseNumber ? `
 <p class="muted" style="margin:20px 0 0;padding-top:14px;border-top:1px solid ${C.rule};font:13px/1.55 ${FONT};color:${C.muted}">This case has been closed. Responses to this email will not be received. To re-open the case, please email <a href="mailto:${SUPPORT}" class="lnk" style="${linkStyle}">support</a>. Case number: <strong>${esc(caseNumber)}</strong></p>` : ""}
 </td></tr>
-<tr><td class="foot" style="background:${C.foot};border-radius:0 0 14px 14px;padding:18px 34px;font:12px/1.5 ${FONT};color:#7A6E5B">Maestro Pro, made by <a href="https://thecaffeinemediacompany.com" style="color:#7A6E5B">Toby Jones</a> &middot; <a href="https://maestro-pro.app/" style="color:#7A6E5B">maestro-pro.app</a> &middot; <a href="mailto:${contact}" style="color:#7A6E5B">${contact}</a>${aiNotice ? `<div style="margin-top:8px;font-size:10px;line-height:1.3;color:#8A8070">${AI_NOTICE}</div>` : ""}</td></tr>
+<tr><td class="foot" style="background:${C.foot};border-radius:0 0 14px 14px;padding:18px 34px;font:12px/1.5 ${FONT};color:#7A6E5B">Maestro Pro, made by <a href="https://thecaffeinemediacompany.com" style="color:#7A6E5B">Caffeine Media</a> &middot; <a href="https://maestro-pro.app/" style="color:#7A6E5B">maestro-pro.app</a> &middot; <a href="mailto:${contact}" style="color:#7A6E5B">${contact}</a>${aiNotice ? `<div style="margin-top:8px;font-size:10px;line-height:1.3;color:#8A8070">${AI_NOTICE}</div>` : ""}</td></tr>
 </table></td></tr></table></body></html>`;
   // ----- plain text
   const parts = [hi, ...blocks.map((b) => (b.type === "steps" ? b.items.map((l, i) => `${i + 1}. ${text(l)}`).join("\n") : b.type === "bullets" ? b.items.map((l) => `- ${text(l)}`).join("\n") : b.items.map(text).join("\n"))),
@@ -466,7 +466,7 @@ async function draft(subject, body, guide = { top: [], outline: "" }, code = [],
     }),
   });
   if (!r.ok) throw new Error("LLM " + r.status);
-  // Open models sometimes wrap the JSON in prose or code fences: take the first {...}. Anything unparseable escalates to Toby.
+  // Open models sometimes wrap the JSON in prose or code fences: take the first {...}. Anything unparseable escalates to the owner.
   const content = (await r.json()).choices?.[0]?.message?.content || "";
   let j = {};
   try { j = JSON.parse(/\{[\s\S]*\}/.exec(content)?.[0] || "{}"); } catch { /* escalate below */ }
@@ -503,7 +503,7 @@ export default async function handler(req, res) {
     const body = plain(full);
     Object.assign(ctx, { from, subject, body });
     const msgId = evt.data.message_id || full.message_id;
-    // A customer asking to re-open a closed case, and quoting its case number, goes straight to Toby with the old case put back on the desk.
+    // A customer asking to re-open a closed case, and quoting its case number, goes straight to the owner with the old case put back on the desk.
     if (REOPEN.test(`${subject}\n${body}`)) {
       const hit = await findCase([subject, full.text || "", String(full.html || "").replace(/<[^>]+>/g, " ")].join("\n")).catch(() => null);
       if (hit?.id) return reopenCase({ res, id, from, subject, body, msgId, hit });
@@ -579,7 +579,7 @@ export default async function handler(req, res) {
     res.status(200).json({ ok: true, escalated: escalate });
   } catch (err) {
     console.error(err);
-    // The automatic reply failed (the model API, Resend, anything): forward the customer's email to Toby so it is answered by hand.
+    // The automatic reply failed (the model API, Resend, anything): forward the customer's email to the owner so it is answered by hand.
     // Returns 200 so Resend doesn't retry into a loop.
     await send({
       from: FROM(), to: [FORWARD_TO], ...(addr(ctx.from) && { reply_to: addr(ctx.from) }),
@@ -591,8 +591,8 @@ export default async function handler(req, res) {
   }
 }
 
-/** The customer wants a closed case opened again. The old chain is put back on the desk as open (so Toby sees everything said before), the
- *  customer is told it has been escalated, and Toby is emailed a link. */
+/** The customer wants a closed case opened again. The old chain is put back on the desk as open (so the owner sees everything said before), the
+ *  customer is told it has been escalated, and the owner is emailed a link. */
 async function reopenCase({ res, id, from, subject, body, msgId, hit }) {
   const tid = hit.id, text = `I’m sorry the issue has not been resolved. I have re-opened case ${hit.caseNumber} and escalated it, and someone will get back to you shortly.`;
   try {
@@ -609,8 +609,8 @@ async function reopenCase({ res, id, from, subject, body, msgId, hit }) {
   }
 }
 
-/** An email sent straight to escalations@ (a customer replying to one of Toby's emails, or to a bot escalation). No automatic reply:
- *  the chain is stored, reopened, and Toby is emailed a link to the desk. */
+/** An email sent straight to escalations@ (a customer replying to one of the owner's emails, or to a bot escalation). No automatic reply:
+ *  the chain is stored, reopened, and the owner is emailed a link to the desk. */
 async function deskInbound(evt, res) {
   const id = evt.data.email_id;
   try {
@@ -629,7 +629,7 @@ async function deskInbound(evt, res) {
     res.status(200).json({ ok: true, escalated: true });
   } catch (err) {
     console.error(err);
-    // Still tell Toby, with the raw email, so an escalation is never lost.
+    // Still tell the owner, with the raw email, so an escalation is never lost.
     await send({ from: FROM(), to: [OWNER], subject: `Escalation raised: ${String(evt.data.subject || "(no subject)").slice(0, 180)}`, text: `An escalation has been raised, but it could not be read (${String(err.message).slice(0, 100)}). Open the desk: ${deskLink()}\n\nFrom: ${evt.data.from || ""}` }, `support-desk-fwd-${id}`).catch(() => {});
     res.status(200).json({ ok: false });
   }

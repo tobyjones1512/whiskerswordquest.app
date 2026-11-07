@@ -205,7 +205,7 @@ const planTitles = (a) => {
   return [...new Set((named.length ? named : a.valid.map((p) => p.description)).filter(Boolean))].join(", ") || "Maestro Pro";
 };
 
-/** Tells Toby why someone cancelled, which plan they were on and what was done. Never fails the cancellation. */
+/** Tells the owner why someone cancelled, which plan they were on and what was done. Never fails the cancellation. */
 async function tellOwner(a, key, reason, result) {
   if (!process.env.RESEND_API_KEY) return;
   const plans = planTitles(a);
