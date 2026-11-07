@@ -50,6 +50,8 @@ const blobStore = {
 let store = blobStore;
 export const useStore = (s) => { store = s || blobStore; };   // for tests
 const readJson = (path) => store.read(path), writeJson = (path, data) => store.write(path, data);
+/** Plain overwrite, for files that are simply reset. */
+export const writeRaw = (path, data) => writeJson(path, data);
 export const readVersioned = async (path) => (store.readV ? store.readV(path) : { data: await store.read(path), etag: "-" });
 export const writeVersioned = async (path, data, etag) => (store.writeV ? store.writeV(path, data, etag) : (await store.write(path, data), true));
 
