@@ -88,10 +88,9 @@ export async function updateState(hash, fn, tries = 6) {
 }
 
 // ---- Education licences have no device limit. They are the same kind of key as any other, so they are recognised by their plan:
-// a subscription or instalment plan named for an organisation (not a student plan), or a yearly price of 400 pounds or more.
-const EDU_NAME = new RegExp(process.env.EDUCATION_PLAN_PATTERN || "\\b(education|school|college|organi[sz]ation|institution|music service|tuition)\\b", "i");
-export const EDU_YEARLY_PENCE = 40000;
-export const planIsEducation = (p) => (EDU_NAME.test(p.name || "") && !/student/i.test(p.name || "")) || (p.unit === "yearly" && p.amount >= EDU_YEARLY_PENCE) || (p.total >= EDU_YEARLY_PENCE);
+// any Maestro Pro subscription or instalment plan with "Education" in its name. (EDUCATION_PLAN_PATTERN can change the word.)
+const EDU_NAME = new RegExp(process.env.EDUCATION_PLAN_PATTERN || "education", "i");
+export const planIsEducation = (p) => EDU_NAME.test(p.name || "");
 /** True when this GoCardless customer's Maestro Pro plan is an Education licence. */
 export async function isEducation(customerId) {
   const subs = (await gc("GET", `/subscriptions?customer=${customerId}&status=active`)).data.subscriptions || [];
