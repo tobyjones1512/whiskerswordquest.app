@@ -4,6 +4,9 @@
 //   OPENAI_API_KEY          OpenAI key. OPENAI_MODEL overrides the model (default gpt-5-nano, the cheapest of the small models).
 //   RESEND_API_KEY          already used by the other endpoints.
 //   RESEND_WEBHOOK_SECRET   the signing secret ("whsec_...") of the Resend webhook that points at this endpoint.
+//   APP_CODE_REPO           optional, "owner/name" of the PRIVATE app repo, so the model can understand how the app behaves.
+//   APP_CODE_TOKEN          a fine-grained GitHub token with read-only "Contents" access to that one repo.
+//   APP_CODE_DIRS           optional, comma-separated folders to include (default: the whole repo).
 //   SUPPORT_FROM            optional, default "Maestro Pro Support <support@maestro-pro.app>".
 import crypto from "node:crypto";
 
@@ -36,6 +39,7 @@ Rules:
 - If they want a refund or to cancel: say it is handled on the cancellation page and cannot be done by email (links: ["refund"]).
 - If they lost or can't find their licence key: links ["key"]. If they lost the TestFlight or download link: links ["testflight"].
 - You may be given <guide_page> excerpts from the official guide. Use them to answer how-to and fault questions, in plain terms for a user, step by step if needed. Never invent a setting, menu or feature that is not in the facts or the excerpts; if they do not cover the question, escalate.
+- You may also be given <app_code> excerpts from the app's source. Their only purpose is to help you give accurate directions: use them to work out where a feature lives and what it is called on screen (menus, buttons, tabs, settings, tools, gestures) and the real steps to use it, then tell the customer exactly where to tap or click and what to do, in plain words. Use the on-screen names a customer would see. NEVER reference code in any way: no file names, class or function names, variables, "the code", "the source" or "I can see". Never say you have access to the code. If the excerpts don't show how to do something, say what you are sure of from the guide, or escalate. If the excerpts suggest the customer has hit a real bug, tell them Toby will look into it and set escalate to true.
 - Add the "guide" link when you used an excerpt (it points at the page), and "troubleshooting" for faults.
 - Never promise refunds, discounts, dates or features. Never ask for card details or passwords.
 - Do not write any URLs yourself; use the links field.
@@ -77,6 +81,41 @@ async function relevantPages(subject, body) {
     return { p, n };
   }).filter((x) => x.n > 2).sort((a, b) => b.n - a.n).slice(0, 2);
   return scored.map((x) => x.p);
+}
+
+// ---- Reference material 2: the app's own source, read from a private GitHub repo. Inert unless APP_CODE_REPO and APP_CODE_TOKEN are set.
+// Only the three files whose names best match the email are fetched, redacted of anything secret-looking, and cut to 6,000 characters.
+const CODE_EXT = /\.(swift|m|mm|h|kt|java|js|ts|tsx|py|md|txt|strings)$/i;
+const CODE_SKIP = /(^|\/)(\.git|node_modules|Pods|Carthage|build|DerivedData|\.build|Assets\.xcassets|Tests?|fastlane)(\/|$)|(\.env|secret|credential|entitlements|xcconfig|\.p12|\.pem|\.key|\.mobileprovision)/i;
+let codeCache = { at: 0, files: [] };
+const gh = (path, raw) => fetch(`https://api.github.com/repos/${process.env.APP_CODE_REPO}/${path}`, { headers: { Authorization: `Bearer ${process.env.APP_CODE_TOKEN}`, Accept: raw ? "application/vnd.github.raw+json" : "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28" } });
+
+async function codeFiles() {
+  if (!process.env.APP_CODE_REPO || !process.env.APP_CODE_TOKEN) return [];
+  if (codeCache.files.length && Date.now() - codeCache.at < 3600e3) return codeCache.files;
+  try {
+    const t = await (await gh("git/trees/HEAD?recursive=1")).json();
+    const dirs = (process.env.APP_CODE_DIRS || "").split(",").map((d) => d.trim()).filter(Boolean);
+    const files = (t.tree || []).filter((f) => f.type === "blob" && f.size < 60000 && CODE_EXT.test(f.path) && !CODE_SKIP.test(f.path) && (!dirs.length || dirs.some((d) => f.path.startsWith(d))));
+    codeCache = { at: Date.now(), files };
+  } catch { /* no code reference this time */ }
+  return codeCache.files;
+}
+
+/** Strips anything that looks like a credential before the text reaches the model. */
+export const redact = (src) =>
+  String(src).split("\n").map((l) => (/(secret|token|passw(or)?d|api[_-]?key|private[_-]?key|authorization|bearer)\s*[:=]/i.test(l) || /\b(sk-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_\w+|AKIA[0-9A-Z]{12,}|re_[A-Za-z0-9]{16,}|whsec_\w+)/.test(l) ? "[redacted]" : l)).join("\n");
+
+async function relevantCode(subject, body) {
+  const want = new Set(words(subject + " " + body));
+  const top = (await codeFiles())
+    .map((f) => ({ f, n: words(f.path.replace(/([a-z])([A-Z])/g, "$1 $2")).filter((w) => want.has(w)).length }))
+    .filter((x) => x.n > 0).sort((a, b) => b.n - a.n).slice(0, 3);
+  const out = [];
+  for (const { f } of top) {
+    try { out.push({ path: f.path, body: redact(await (await gh(`contents/${encodeURI(f.path)}`, true)).text()).slice(0, 6000) }); } catch { /* skip */ }
+  }
+  return out;
 }
 
 async function readRaw(req) {
@@ -121,7 +160,7 @@ const plain = (e) => {
   return t.slice(0, 4000);
 };
 
-async function draft(subject, body, pages = []) {
+async function draft(subject, body, pages = [], code = []) {
   const r = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, "Content-Type": "application/json" },
@@ -132,7 +171,7 @@ async function draft(subject, body, pages = []) {
       response_format: { type: "json_object" },
       messages: [
         { role: "system", content: SYSTEM },
-        { role: "user", content: `${pages.map((p) => `<guide_page title="${p.title}">\n${p.body.slice(0, 5000)}\n</guide_page>`).join("\n")}\nSubject: ${subject}\n\n<customer_email>\n${body}\n</customer_email>` },
+        { role: "user", content: `${code.map((c) => `<app_code path="${c.path}">\n${c.body}\n</app_code>`).join("\n")}\n${pages.map((p) => `<guide_page title="${p.title}">\n${p.body.slice(0, 5000)}\n</guide_page>`).join("\n")}\nSubject: ${subject}\n\n<customer_email>\n${body}\n</customer_email>` },
       ],
     }),
   });
@@ -168,7 +207,8 @@ export default async function handler(req, res) {
     const body = plain(full);
     const msgId = evt.data.message_id || full.message_id;
     const pages = await relevantPages(subject, body);
-    const d = await draft(subject, body, pages);
+    const code = await relevantCode(subject, body);
+    const d = await draft(subject, body, pages, code);
 
     // "guide" points at the best-matching page when there is one.
     const links = { ...LINKS, ...(pages[0] && { guide: [`Guide: ${pages[0].title}`, pages[0].url] }) };
