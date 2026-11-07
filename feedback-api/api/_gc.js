@@ -69,7 +69,7 @@ export async function customersByEmail(email) {
   return ids;
 }
 
-const isMaestro = (x) => /maestro pro/i.test(x ?? "");
+export const isMaestro = (x) => /maestro pro/i.test(x ?? "");
 
 /** True when this customer's latest bill is paid or on its way, for a plan with "Maestro Pro" in its title, at any price
  *  (students pay £48 a year or £6 a month, schools more): a one-off payment from the last year, or an active

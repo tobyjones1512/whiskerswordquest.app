@@ -3,7 +3,7 @@
 // BLOB_ACCESS is "private" (default) or "public", and must match how the store was created. Nothing here may ever break the support bot:
 // callers wrap every call in try/catch, and without a store the bot simply works as before and the desk shows that storage is not connected.
 import crypto from "node:crypto";
-import { put, get } from "@vercel/blob";
+import { put, get, BlobPreconditionFailedError } from "@vercel/blob";
 
 export const storeReady = () => Boolean(process.env.BLOB_READ_WRITE_TOKEN);
 const ACCESS = () => (process.env.BLOB_ACCESS === "public" ? "public" : "private");
@@ -28,10 +28,30 @@ const blobStore = {
     } catch { return null; }
   },
   write: (path, data) => put(path, JSON.stringify(data), { access: ACCESS(), allowOverwrite: true, addRandomSuffix: false, contentType: "application/json", cacheControlMaxAge: 60 }),
+  /** Read with the blob's ETag, for a conditional write afterwards. */
+  async readV(path) {
+    try {
+      const r = await get(path, { access: ACCESS(), useCache: false });
+      if (!r || r.statusCode !== 200) return { data: null, etag: null };
+      return { data: JSON.parse(await new Response(r.stream).text()), etag: r.blob.etag };
+    } catch { return { data: null, etag: null }; }
+  },
+  /** Writes only if nobody else has since (the ETag still matches, or the blob still does not exist). False when someone got there first. */
+  async writeV(path, data, etag) {
+    try {
+      await put(path, JSON.stringify(data), { access: ACCESS(), addRandomSuffix: false, contentType: "application/json", cacheControlMaxAge: 60, ...(etag ? { allowOverwrite: true, ifMatch: etag } : { allowOverwrite: false }) });
+      return true;
+    } catch (e) {
+      if (e instanceof BlobPreconditionFailedError || /already exists|precondition/i.test(String(e?.message))) return false;
+      throw e;
+    }
+  },
 };
 let store = blobStore;
 export const useStore = (s) => { store = s || blobStore; };   // for tests
 const readJson = (path) => store.read(path), writeJson = (path, data) => store.write(path, data);
+export const readVersioned = async (path) => (store.readV ? store.readV(path) : { data: await store.read(path), etag: "-" });
+export const writeVersioned = async (path, data, etag) => (store.writeV ? store.writeV(path, data, etag) : (await store.write(path, data), true));
 
 const clip = (t, n) => String(t ?? "").replace(/\s+/g, " ").trim().slice(0, n);
 export function summary(t) {
