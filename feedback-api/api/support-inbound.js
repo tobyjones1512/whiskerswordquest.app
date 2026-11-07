@@ -293,7 +293,7 @@ export const firstSentence = (s) => { const m = /^(.{20,160}?[.!?])(\s|$)/.exec(
 
 /** Builds the customer's email, HTML and plain text, from the model's reply. Links inside the reply are written [text](target) and every
  *  target is checked by `resolve`; the model never supplies a URL. `buttons` are [label, url] actions, `guides` are {title, url, summary}. */
-export function buildEmail({ name, reply, buttons = [], guides = [], aiNotice = false, resolve = () => null, label = "Support", contact = SUPPORT }) {
+export function buildEmail({ name, reply, buttons = [], guides = [], aiNotice = false, resolve = () => null, label = "Support", contact = SUPPORT, signoff = "Maestro Pro Support" }) {
   const blocks = parseBlocks(reply), used = new Set(), hi = `Hi ${name || "there"},`;
   const text = (t) => inlineText(t, resolve, new Set());
   // ----- html body
@@ -319,13 +319,13 @@ export function buildEmail({ name, reply, buttons = [], guides = [], aiNotice = 
 <tr><td class="card" style="background:${C.paper};padding:32px 34px 30px;font:16px/1.6 ${FONT};color:${C.ink}">
 <p class="ink" style="margin:0 0 18px;font:700 22px/1.3 ${SERIF};color:${C.ink}">${esc(hi)}</p>
 ${body}${buttonsHtml}${guidesHtml}
-<p class="ink" style="margin:26px 0 0;font:16px/1.5 ${FONT};color:${C.ink}">Best regards,<br><strong>Maestro Pro Support</strong></p>
+<p class="ink" style="margin:26px 0 0;font:16px/1.5 ${FONT};color:${C.ink}">Best regards,<br><strong>${esc(signoff)}</strong></p>
 </td></tr>
 <tr><td class="foot" style="background:${C.foot};border-radius:0 0 14px 14px;padding:18px 34px;font:12px/1.5 ${FONT};color:#7A6E5B">Maestro Pro, made by <a href="https://thecaffeinemediacompany.com" style="color:#7A6E5B">Toby Jones</a> &middot; <a href="https://maestro-pro.app/" style="color:#7A6E5B">maestro-pro.app</a> &middot; <a href="mailto:${contact}" style="color:#7A6E5B">${contact}</a>${aiNotice ? `<div style="margin-top:8px;font-size:10px;line-height:1.3;color:#8A8070">${AI_NOTICE}</div>` : ""}</td></tr>
 </table></td></tr></table></body></html>`;
   // ----- plain text
   const parts = [hi, ...blocks.map((b) => (b.type === "steps" ? b.items.map((l, i) => `${i + 1}. ${text(l)}`).join("\n") : b.type === "bullets" ? b.items.map((l) => `- ${text(l)}`).join("\n") : b.items.map(text).join("\n"))),
-    ...(btns.length ? [btns.map(([l, u]) => `${l}: ${u}`).join("\n")] : []), ...(gds.length ? [gds.map((g) => `Guide: ${g.title} (${g.url})`).join("\n")] : []), "Best regards,\nMaestro Pro Support", ...(aiNotice ? [AI_NOTICE] : [])];
+    ...(btns.length ? [btns.map(([l, u]) => `${l}: ${u}`).join("\n")] : []), ...(gds.length ? [gds.map((g) => `Guide: ${g.title} (${g.url})`).join("\n")] : []), `Best regards,\n${signoff}`, ...(aiNotice ? [AI_NOTICE] : [])];
   return { html, text: parts.join("\n\n") };
 }
 

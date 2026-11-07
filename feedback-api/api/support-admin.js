@@ -74,7 +74,7 @@ export default async function handler(req, res) {
       const { pages } = await guideTree();
       const known = new Map(pages.map((p) => [p.slug, p]));
       const guides = [...new Set([].concat(b.guides || []).map(String))].filter((s) => known.has(s)).slice(0, 6).map((s) => { const g = known.get(s); return { slug: s, title: g.title, url: g.url, summary: firstSentence(g.summary || "") }; });
-      const { html, text: plain } = buildEmail({ name: thread.name, reply: text, guides, resolve: makeResolve(known), label: "Escalations", contact: ESCALATIONS });
+      const { html, text: plain } = buildEmail({ name: thread.name, reply: text, guides, resolve: makeResolve(known), label: "Escalations", contact: ESCALATIONS, signoff: "Maestro Pro Escalations Team" });
       const lastIn = [...thread.messages].reverse().find((m) => m.dir === "in" && m.msgId)?.msgId;
       const r = await send({
         from: FROM(), to: [thread.customer], reply_to: ESCALATIONS,
