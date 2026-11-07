@@ -15,6 +15,7 @@ import { gc, parseStudentKey } from "./_gc.js";
 const ORIGINS = ["https://maestro-pro.app", "https://www.maestro-pro.app", "https://thecaffeinemediacompany.com", "https://www.thecaffeinemediacompany.com"];
 const TERM_MONTHS = 12;
 const RETENTION_PENCE = 500;
+const RETENTION_URL = "https://pay.gocardless.com/BRT01M6STVRK3EGKX9FKBBSXD912J";
 const DAY = 864e5;
 const BAD = ["failed", "cancelled", "customer_approval_denied", "charged_back"];
 const NOT_COLLECTED = ["pending_customer_approval", "pending_submission"]; // can still be cancelled
@@ -205,7 +206,9 @@ export default async function handler(req, res) {
       : a.outcome === "cancel_rolling" ? `Your £5 a month plan and its Direct Debit are cancelled, with no fee. Your licence key will work until ${dateStr(a.accessUntil)}.`
       : a.monthly ? "Your licence has been cancelled." : `Your subscription and Direct Debit mandate are cancelled. Your licence key will work until ${dateStr(a.accessUntil)}.`;
     await notify(a, msg);
-    res.status(200).json({ ok: true, done: true, outcome: a.outcome, message: msg });
+    // The retention offer is only ever sent to someone who has just been refunded, never published on the site.
+    const offer = a.outcome === "refund" ? { title: "Before you go: Professional for £5 a month.", text: "Keep every Professional feature, including the score editor and version history, for half the usual monthly price. It rolls month to month, and you can cancel any time with no fee and no waiting period.", cta: "Keep Professional for £5 a month", url: RETENTION_URL } : undefined;
+    res.status(200).json({ ok: true, done: true, outcome: a.outcome, message: msg, offer });
   } catch (err) {
     if (err.status) return res.status(err.status).json({ error: err.message });
     console.error(err);
