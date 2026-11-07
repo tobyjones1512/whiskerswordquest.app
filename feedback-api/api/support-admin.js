@@ -5,6 +5,7 @@ import crypto from "node:crypto";
 import { buildEmail, guideTree, LINKS, send, firstSentence, ESCALATIONS, DEFAULT_PROMPT } from "./support-inbound.js";
 import { OFFER_P, OFFER_FINAL } from "./student-cancel.js";
 import { buildKeyEmail, KEY_FROM, KEY_SUBJECT } from "./_key-email.js";
+import { loadActivity, seedActivity, TEST_EMAIL } from "./_activity.js";
 import { loadIndex, loadThread, recordMessage, saveThread, storeReady, loadSettings, saveSettings, assignCase } from "./_threads.js";
 
 const NOREPLY = "noreply@maestro-pro.app";
@@ -82,7 +83,7 @@ export default async function handler(req, res) {
     if (req.method === "GET") {
       if (!storeReady()) return res.status(200).json({ storage: false, threads: [] });
       if (req.query.view === "settings") return res.status(200).json({ storage: true, settings: await settingsView() });
-      if (req.query.id) { const thread = await loadThread(req.query.id); if (thread) await addDelivery(thread); return thread ? res.status(200).json({ storage: true, thread }) : res.status(404).json({ error: "No such chain." }); }
+      if (req.query.id) { const thread = await loadThread(req.query.id); let activity = []; if (thread) { await addDelivery(thread); activity = await loadActivity(thread.customer).catch(() => []); } return thread ? res.status(200).json({ storage: true, thread, activity }) : res.status(404).json({ error: "No such chain." }); }
       return res.status(200).json({ storage: true, threads: await loadIndex() });
     }
     if (req.method !== "POST") return res.status(405).json({ error: "GET or POST only." });
@@ -113,6 +114,14 @@ export default async function handler(req, res) {
       const out = await r.json().catch(() => ({}));
       if (!r.ok) return res.status(502).json({ error: `The test email could not be sent: ${String(out.message || out.error || "Resend " + r.status).slice(0, 200)}` });
       return res.status(200).json({ ok: true, id: out.id || null });
+    }
+
+    if (b.action === "seed-test-data") {
+      // A made-up customer, an escalated refund chain and a spread of account activity, so the activity log can be tried without a real customer.
+      const entries = await seedActivity();
+      const t = await recordMessage({ customer: TEST_EMAIL, name: "Test Customer", subject: "Refund has not arrived", message: { key: "seed-test-1", dir: "in", by: "customer", text: "Hi, I asked for a refund last week and it still has not arrived. I also removed my old iPad from the licence. Please can you check what is going on?" }, escalate: { reason: "Refund problem (test data)" } });
+      if (t.status !== "open") { t.status = "open"; t.updatedAt = new Date().toISOString(); await saveThread(t); }
+      return res.status(200).json({ ok: true, entries, id: t.id });
     }
 
     const thread = await loadThread(b.id);

@@ -15,6 +15,7 @@
 // Offered after a refund. It has no refund window, no 14-day wait and no fee: cancelling stops it straight away.
 // Needs GOCARDLESS_ACCESS_TOKEN, LICENCE_SECRET, RESEND_API_KEY. GoCardless refunds must be enabled on the account.
 import { gc, parseStudentKey } from "./_gc.js";
+import { logActivity, TEST_EMAIL } from "./_activity.js";
 
 const ORIGINS = ["https://maestro-pro.app", "https://www.maestro-pro.app", "https://thecaffeinemediacompany.com", "https://www.thecaffeinemediacompany.com"];
 const TERM_MONTHS = 12;
@@ -281,19 +282,36 @@ export default async function handler(req, res) {
     // Only people in the UK (Vercel's country header) may skip the reason. Test keys may, so the button can be tried anywhere.
     const uk = test || req.headers["x-vercel-ip-country"] === "GB";
     const view = { outcome: a.outcome, message: describe(a), refund: a.refund || 0, fee: a.fee || 0, retryOn: a.retryOn ? dateStr(a.retryOn) : undefined };
-    if (action === "check") return res.status(200).json({ ok: true, ...view, canConfirm: ["refund", "cancel", "cancel_rolling", "fee"].includes(a.outcome), canSkipReason: uk });
+    const email = test ? TEST_EMAIL : a.customer?.email, ukey = String(key).trim().toUpperCase();
+    const REFUND_ISH = ["refund", "too_early", "not_cleared"];
+    if (action === "check") {
+      // Logged for the escalations desk, including refund enquiries that cannot go ahead yet.
+      if (REFUND_ISH.includes(a.outcome)) await logActivity(email, { type: "refund_request", status: a.outcome === "refund" ? "checked" : "not completed", summary: a.outcome === "refund" ? `Checked a refund: ${gbp(a.refund)} would be refunded (day ${a.day})` : a.outcome === "too_early" ? `Asked about a refund, but the first payment was only taken ${a.day} day${a.day === 1 ? "" : "s"} ago` : "Asked about a refund, but the payment has not cleared yet", detail: view.message, key: ukey, amount: a.refund || 0 });
+      return res.status(200).json({ ok: true, ...view, canConfirm: ["refund", "cancel", "cancel_rolling", "fee"].includes(a.outcome), canSkipReason: uk });
+    }
 
-    if (!["refund", "cancel", "cancel_rolling", "fee"].includes(a.outcome)) return res.status(200).json({ ok: true, done: false, ...view });
+    if (!["refund", "cancel", "cancel_rolling", "fee"].includes(a.outcome)) {
+      if (REFUND_ISH.includes(a.outcome)) await logActivity(email, { type: "refund_request", status: "not completed", summary: a.outcome === "too_early" ? `Asked for a refund, but the first payment was only taken ${a.day} day${a.day === 1 ? "" : "s"} ago` : "Asked for a refund, but the payment has not cleared yet", detail: view.message, key: ukey, amount: 0 });
+      return res.status(200).json({ ok: true, done: false, ...view });
+    }
     // A reason of at least MIN_WORDS words is required before anything is refunded, charged or cancelled, unless a UK customer chose to skip it.
     const skip = skipReason === true && uk;
     if (!skip && wordCount(reason) < MIN_WORDS || String(reason).length > 3000) return res.status(400).json({ error: `Please tell us why you're cancelling, in at least ${MIN_WORDS} words.` });
     // Refuse if the amounts moved since the customer read them (a day boundary, a new payment).
     if (Number(refund || 0) !== view.refund || Number(fee || 0) !== view.fee) return res.status(409).json({ error: "Your account changed while you were reading this. Please start again." });
-    if (!test) await execute(a, customerId); // test keys change nothing
+    const what = a.outcome === "refund" ? "refund" : "cancellation", money = a.outcome === "refund" ? a.refund : a.fee;
+    const why = skip ? "Reason: customer chose not to give one." : `Reason given: ${String(reason).replace(/\s+/g, " ").trim().slice(0, 400)}`;
+    try {
+      if (!test) await execute(a, customerId); // test keys change nothing
+    } catch (err) {
+      await logActivity(email, { type: what, status: "failed", summary: `${what === "refund" ? `Refund of ${gbp(a.refund)}` : "Cancellation"} attempted but failed, nothing was completed`, detail: err.message, key: ukey, amount: money });
+      throw err;
+    }
     const msg = a.outcome === "refund" ? `We have refunded ${gbp(a.refund)}, which should reach your bank in a few working days, and cancelled your licence.`
       : a.outcome === "fee" ? `We have collected the ${gbp(a.fee)} cancellation fee and cancelled your remaining monthly payments. Your licence key will work until ${dateStr(a.accessUntil)}.`
       : a.outcome === "cancel_rolling" ? `Your £5 a month plan is cancelled, with no fee. Your licence key will work until ${dateStr(a.accessUntil)}.`
       : a.monthly ? "Your licence has been cancelled." : `Your subscription is cancelled and nothing more will be taken. Your licence key will work until ${dateStr(a.accessUntil)}.`;
+    await logActivity(email, { type: what, status: "completed", summary: a.outcome === "refund" ? `Refunded ${gbp(a.refund)} and cancelled the licence` : a.outcome === "fee" ? `Cancelled the licence and collected a ${gbp(a.fee)} early cancellation fee` : `Cancelled the licence, access until ${dateStr(a.accessUntil)}`, detail: why, key: ukey, amount: money });
     await sendConfirmation(a, test);
     if (!test) await tellOwner(a, String(key).trim().toUpperCase(), skip ? "(The customer chose not to give a reason.)" : reason, msg);
     // The retention offer is only ever sent in this response and the email, never published on the site.
