@@ -40,16 +40,41 @@ async function all(path, key) {
   return out;
 }
 
+// ---- Test keys. Only when the MAESTRO_TEST_KEYS environment variable is "1" on Vercel: keys like MPS-TEST-REFUND
+// run each route against made-up payments, touch nothing at GoCardless and send no email. Leave it unset in normal use.
+const iso = (daysAgo) => new Date(Date.now() - daysAgo * DAY).toISOString().slice(0, 10);
+const tSub = (unit, amount, name = "Maestro Pro Professional") => ({ id: "SBTEST", name, status: "active", interval_unit: unit, interval: 1, amount, links: { mandate: "MDTEST" } });
+const tPay = (daysAgo, status, amount, id = "PMTEST" + daysAgo) => ({ id, status, amount, amount_refunded: 0, charge_date: iso(daysAgo), description: "Maestro Pro Professional", links: { subscription: "SBTEST", mandate: "MDTEST" } });
+const TEST_WORLDS = {
+  "MPS-TEST-EARLY": { subs: [tSub("yearly", 8900)], pays: [tPay(3, "submitted", 8900)] }, // day 3: too early
+  "MPS-TEST-CLEARING": { subs: [tSub("yearly", 8900)], pays: [tPay(9, "submitted", 8900)] }, // day 9 but not cleared
+  "MPS-TEST-REFUND": { subs: [tSub("yearly", 8900)], pays: [tPay(10, "paid_out", 8900)] }, // day 10, annual: refund
+  "MPS-TEST-REFUND-MONTHLY": { subs: [tSub("monthly", 1000)], pays: [tPay(10, "paid_out", 1000), tPay(-20, "pending_submission", 1000, "PMNEXT")] }, // day 10, monthly: refund
+  "MPS-TEST-ANNUAL-LATE": { subs: [tSub("yearly", 8900)], pays: [tPay(40, "paid_out", 8900)] }, // day 40, annual: cancel, no refund
+  "MPS-TEST-MONTHLY-FEE": { subs: [tSub("monthly", 1000)], pays: [tPay(70, "paid_out", 1000), tPay(40, "paid_out", 1000), tPay(10, "paid_out", 1000), tPay(-20, "pending_submission", 1000, "PMNEXT")] }, // 3 paid: fee 50.00
+  "MPS-TEST-MONTHLY-LATE": { subs: [tSub("monthly", 1000)], pays: [tPay(20, "paid_out", 1000), tPay(-10, "pending_submission", 1000, "PMNEXT")] }, // 1 paid: fee 60.00
+  "MPS-TEST-ROLLING": { subs: [tSub("monthly", RETENTION_PENCE)], pays: [tPay(3, "submitted", RETENTION_PENCE)] }, // retention plan: free, instant
+  "MPS-TEST-CANCELLED": { mandate: "cancelled", subs: [{ ...tSub("yearly", 8900), status: "cancelled" }], pays: [tPay(40, "paid_out", 8900)] }, // already cancelled
+};
+const testKey = (key) => (process.env.MAESTRO_TEST_KEYS === "1" && TEST_WORLDS[String(key ?? "").trim().toUpperCase()] ? String(key).trim().toUpperCase() : null);
+
 /** Everything about this customer's Maestro Pro licence, and the outcome the rules give today. */
 async function assess(customerId, now = Date.now()) {
-  const customer = (await gc("GET", `/customers/${customerId}`)).data.customers;
-  if (!customer) throw fail(404, "We can't find that licence.");
-  const [subsAll, schedsAll, pays, mandates] = await Promise.all([
-    all(`/subscriptions?customer=${customerId}`, "subscriptions"),
-    all(`/instalment_schedules?customer=${customerId}`, "instalment_schedules"),
-    all(`/payments?customer=${customerId}`, "payments"),
-    all(`/mandates?customer=${customerId}`, "mandates"),
-  ]);
+  let customer, subsAll, schedsAll, pays, mandates;
+  if (TEST_WORLDS[customerId]) {
+    const w = TEST_WORLDS[customerId];
+    customer = { id: "CUTEST", email: "test@example.com", metadata: {} };
+    ({ subs: subsAll, pays } = w); schedsAll = []; mandates = [{ id: "MDTEST", status: w.mandate || "active" }];
+  } else {
+    customer = (await gc("GET", `/customers/${customerId}`)).data.customers;
+    if (!customer) throw fail(404, "We can't find that licence.");
+    [subsAll, schedsAll, pays, mandates] = await Promise.all([
+      all(`/subscriptions?customer=${customerId}`, "subscriptions"),
+      all(`/instalment_schedules?customer=${customerId}`, "instalment_schedules"),
+      all(`/payments?customer=${customerId}`, "payments"),
+      all(`/mandates?customer=${customerId}`, "mandates"),
+    ]);
+  }
   const subs = subsAll.filter((s) => isMaestro(s.name));
   const scheds = schedsAll.filter((s) => isMaestro(s.name));
   const subIds = new Set(subs.map((s) => s.id)), schedIds = new Set(scheds.map((s) => s.id));
@@ -188,7 +213,7 @@ export default async function handler(req, res) {
   if (!ORIGINS.includes(origin)) return res.status(403).json({ error: "Not allowed." });
 
   const { key, action, refund, fee } = req.body || {};
-  const customerId = parseStudentKey(key);
+  const customerId = testKey(key) || parseStudentKey(key);
   if (!customerId) return res.status(400).json({ error: "That licence key isn't valid. Check it and try again." });
   if (action !== "check" && action !== "confirm") return res.status(400).json({ error: "Unknown action." });
 
@@ -200,12 +225,12 @@ export default async function handler(req, res) {
     if (!["refund", "cancel", "cancel_rolling", "fee"].includes(a.outcome)) return res.status(200).json({ ok: true, done: false, ...view });
     // Refuse if the amounts moved since the customer read them (a day boundary, a new payment).
     if (Number(refund || 0) !== view.refund || Number(fee || 0) !== view.fee) return res.status(409).json({ error: "Your account changed while you were reading this. Please start again." });
-    await execute(a, customerId);
+    if (!TEST_WORLDS[customerId]) await execute(a, customerId); // test keys change nothing
     const msg = a.outcome === "refund" ? `We have refunded ${gbp(a.refund)}, which should reach your bank in a few working days, and cancelled your licence.`
       : a.outcome === "fee" ? `We have collected the ${gbp(a.fee)} cancellation fee and cancelled your remaining monthly payments. Your licence key will work until ${dateStr(a.accessUntil)}.`
       : a.outcome === "cancel_rolling" ? `Your £5 a month plan and its Direct Debit are cancelled, with no fee. Your licence key will work until ${dateStr(a.accessUntil)}.`
       : a.monthly ? "Your licence has been cancelled." : `Your subscription and Direct Debit mandate are cancelled. Your licence key will work until ${dateStr(a.accessUntil)}.`;
-    await notify(a, msg);
+    if (!TEST_WORLDS[customerId]) await notify(a, msg);
     // The retention offer is only ever sent to someone who has just been refunded, never published on the site.
     const offer = a.outcome === "refund" ? { title: "Before you go: Professional for £5 a month.", text: "Keep every Professional feature, including the score editor and version history, for half the usual monthly price. It rolls month to month, and you can cancel any time with no fee and no waiting period.", cta: "Keep Professional for £5 a month", url: RETENTION_URL } : undefined;
     res.status(200).json({ ok: true, done: true, outcome: a.outcome, message: msg, offer });
