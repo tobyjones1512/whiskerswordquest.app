@@ -2,6 +2,7 @@
 // so only the owner of the inbox gets it). Needs RESEND_API_KEY, GOCARDLESS_ACCESS_TOKEN, LICENCE_SECRET.
 import { studentKey, studentHasPaid, studentPlans, customersByEmail, validEmail } from "./_gc.js";
 import owns from "./_student-owns.js";
+import { buildKeyEmail, KEY_FROM } from "./_key-email.js";
 
 const ORIGINS = ["https://maestro-pro.app", "https://www.maestro-pro.app", "https://thecaffeinemediacompany.com", "https://www.thecaffeinemediacompany.com"];
 
@@ -26,25 +27,11 @@ export default async function handler(req, res) {
     const found = [];
     for (const c of await customersByEmail(e)) if (await studentHasPaid(c)) found.push({ key: studentKey(c), plans: await studentPlans(c) });
     if (!found.length) return res.status(402).json({ error: "We can't find a payment for that email address. Use the email you paid with." });
-    const one = found.length === 1;
-    const esc = (x) => String(x).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
-    const title = (f) => f.plans.join(", ") || "Maestro Pro";
-    const list = {
-      text: found.map((f) => (one ? f.key : `${title(f)}\n${f.key}`)).join("\n\n"),
-      html: found.map((f) => (one ? `<p><b>${f.key}</b></p>` : `<p>${esc(title(f))}<br><b>${f.key}</b></p>`)).join(""),
-    };
-    const tf = "https://testflight.apple.com/join/rPBpRCu9";
-    const note = "This inbox is not monitored, so please do not reply to this email.";
+    const mail = buildKeyEmail(found);
     const r = await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        from: process.env.CONTACT_FROM || "Maestro Pro <noreply@thecaffeinemediacompany.com>",
-        to: [e],
-        subject: "Your Maestro Pro licence key",
-        text: `${one ? "Your Maestro Pro licence key is:" : `We found ${found.length} active Maestro Pro licence keys for this email address:`}\n\n${list.text}\n\nIn the app, tap "Already have a licence key?" on the paywall and enter ${one ? "this key" : "the key for the plan you want to use"}.\n\nInstall Maestro Pro with TestFlight: ${tf}\n\n${note}`,
-        html: `<p>${one ? "Your Maestro Pro licence key is:" : `We found ${found.length} active Maestro Pro licence keys for this email address:`}</p>${list.html}<p>In the app, tap &ldquo;Already have a licence key?&rdquo; on the paywall and enter ${one ? "this key" : "the key for the plan you want to use"}.</p><p>Install Maestro Pro with <a href="${tf}">TestFlight</a>.</p><p>${note}</p>`,
-      }),
+      body: JSON.stringify({ from: KEY_FROM(), to: [e], subject: mail.subject, text: mail.text, html: mail.html }),
     });
     if (!r.ok) return res.status(502).json({ error: "The email couldn't be sent." });
     res.status(200).json({ ok: true, keys: found.length });

@@ -265,7 +265,8 @@ export function parseBlocks(text) {
     const line = raw.trim();
     if (!line) { cur = null; continue; }
     let m;
-    if ((m = /^\d+[.)]\s+(.*)$/.exec(line))) push("steps", m[1]);
+    if ((m = /^`([^`]+)`$/.exec(line))) { cur = null; blocks.push({ type: "code", items: [m[1]] }); }
+    else if ((m = /^\d+[.)]\s+(.*)$/.exec(line))) push("steps", m[1]);
     else if ((m = /^[-•*]\s+(.*)$/.exec(line))) push("bullets", m[1]);
     else push("p", line);
   }
@@ -296,13 +297,14 @@ export const firstSentence = (s) => { const m = /^(.{20,160}?[.!?])(\s|$)/.exec(
 
 /** Builds the customer's email, HTML and plain text, from the model's reply. Links inside the reply are written [text](target) and every
  *  target is checked by `resolve`; the model never supplies a URL. `buttons` are [label, url] actions, `guides` are {title, url, summary}. */
-export function buildEmail({ name, reply, buttons = [], guides = [], aiNotice = false, resolve = () => null, label = "Support", contact = SUPPORT, signoff = "Maestro Pro Support", caseNumber = "" }) {
+export function buildEmail({ name, reply, buttons = [], guides = [], aiNotice = false, resolve = () => null, label = "Support", contact = SUPPORT, signoff = "Maestro Pro Support", caseNumber = "", footnote = "" }) {
   const blocks = parseBlocks(reply), used = new Set(), hi = `Hi ${name || "there"},`;
   const text = (t) => inlineText(t, resolve, new Set());
   // ----- html body
   const body = blocks.map((b) => {
     if (b.type === "steps") return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin:4px 0 14px">${b.items.map((l, i) =>
       `<tr><td valign="top" width="42" style="padding:0 0 12px"><div style="width:28px;height:28px;line-height:28px;border-radius:14px;background:${C.amber};color:${C.walnut};font:700 14px/28px ${FONT};text-align:center">${i + 1}</div></td><td valign="top" class="ink" style="padding:3px 0 12px;font:16px/1.55 ${FONT};color:${C.ink}">${inlineHtml(l, resolve, used)}</td></tr>`).join("")}</table>`;
+    if (b.type === "code") return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin:2px 0 18px"><tr><td class="guide" style="background:${C.card};border:1px solid ${C.rule};border-radius:10px;padding:14px 18px;font:700 19px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;letter-spacing:.03em;color:${C.ink};word-break:break-all">${esc(b.items[0])}</td></tr></table>`;
     if (b.type === "bullets") return `<ul style="margin:0 0 16px;padding-left:22px">${b.items.map((l) => `<li style="margin:4px 0">${inlineHtml(l, resolve, used)}</li>`).join("")}</ul>`;
     return `<p style="margin:0 0 16px">${b.items.map((l) => inlineHtml(l, resolve, used)).join("<br>")}</p>`;
   }).join("");
@@ -322,14 +324,14 @@ export function buildEmail({ name, reply, buttons = [], guides = [], aiNotice = 
 <tr><td class="card" style="background:${C.paper};padding:32px 34px 30px;font:16px/1.6 ${FONT};color:${C.ink}">
 <p class="ink" style="margin:0 0 18px;font:700 22px/1.3 ${SERIF};color:${C.ink}">${esc(hi)}</p>
 ${body}${buttonsHtml}${guidesHtml}
-<p class="ink" style="margin:26px 0 0;font:16px/1.5 ${FONT};color:${C.ink}">Best regards,<br><strong>${esc(signoff)}</strong></p>${caseNumber ? `
+<p class="ink" style="margin:26px 0 0;font:16px/1.5 ${FONT};color:${C.ink}">Best regards,<br><strong>${esc(signoff)}</strong></p>${footnote ? `\n<p class="muted" style="margin:20px 0 0;padding-top:14px;border-top:1px solid ${C.rule};font:13px/1.55 ${FONT};color:${C.muted}">${esc(footnote)}</p>` : ""}${caseNumber ? `
 <p class="muted" style="margin:20px 0 0;padding-top:14px;border-top:1px solid ${C.rule};font:13px/1.55 ${FONT};color:${C.muted}">This case has been closed. Responses to this email will not be received. To re-open the case, please email <a href="mailto:${SUPPORT}" class="lnk" style="${linkStyle}">support</a>. Case number: <strong>${esc(caseNumber)}</strong></p>` : ""}
 </td></tr>
 <tr><td class="foot" style="background:${C.foot};border-radius:0 0 14px 14px;padding:18px 34px;font:12px/1.5 ${FONT};color:#7A6E5B">Maestro Pro, made by <a href="https://thecaffeinemediacompany.com" style="color:#7A6E5B">Caffeine Media</a> &middot; <a href="https://maestro-pro.app/" style="color:#7A6E5B">maestro-pro.app</a> &middot; <a href="mailto:${contact}" style="color:#7A6E5B">${contact}</a>${aiNotice ? `<div style="margin-top:8px;font-size:10px;line-height:1.3;color:#8A8070">${AI_NOTICE}</div>` : ""}</td></tr>
 </table></td></tr></table></body></html>`;
   // ----- plain text
-  const parts = [hi, ...blocks.map((b) => (b.type === "steps" ? b.items.map((l, i) => `${i + 1}. ${text(l)}`).join("\n") : b.type === "bullets" ? b.items.map((l) => `- ${text(l)}`).join("\n") : b.items.map(text).join("\n"))),
-    ...(btns.length ? [btns.map(([l, u]) => `${l}: ${u}`).join("\n")] : []), ...(gds.length ? [gds.map((g) => `Guide: ${g.title} (${g.url})`).join("\n")] : []), `Best regards,\n${signoff}`, ...(caseNumber ? [`This case has been closed. Responses to this email will not be received. To re-open the case, please email support (${SUPPORT}). Case number: ${caseNumber}`] : []), ...(aiNotice ? [AI_NOTICE] : [])];
+  const parts = [hi, ...blocks.map((b) => (b.type === "steps" ? b.items.map((l, i) => `${i + 1}. ${text(l)}`).join("\n") : b.type === "bullets" ? b.items.map((l) => `- ${text(l)}`).join("\n") : b.type === "code" ? b.items[0] : b.items.map(text).join("\n"))),
+    ...(btns.length ? [btns.map(([l, u]) => `${l}: ${u}`).join("\n")] : []), ...(gds.length ? [gds.map((g) => `Guide: ${g.title} (${g.url})`).join("\n")] : []), `Best regards,\n${signoff}`, ...(footnote ? [footnote] : []), ...(caseNumber ? [`This case has been closed. Responses to this email will not be received. To re-open the case, please email support (${SUPPORT}). Case number: ${caseNumber}`] : []), ...(aiNotice ? [AI_NOTICE] : [])];
   return { html, text: parts.join("\n\n") };
 }
 
