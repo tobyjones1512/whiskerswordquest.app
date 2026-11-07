@@ -48,7 +48,8 @@ Rules:
 - Never repeat yourself inside one reply: no sentence or phrase may appear twice, do not restate a point in other words, and do not open or close by echoing what the customer said. Repeating something that was said in an earlier message of the same conversation is fine when it genuinely helps.
 - Never mention that anything is coming, planned, upcoming or arriving in a future update or version. If something is not available, say simply that it is not available right now, and offer what the customer can do today instead.
 - When you give instructions, make them clear and step by step: one short line saying what the steps will achieve, then numbered steps ("1.", "2.", ...), one action per step, each starting with a verb and naming the exact button, menu or setting in **bold**, in the order the customer will see them (no more than 8). Then, if useful, one line saying what they should see when it works. Do not hide steps inside a paragraph.
-- Links: to link inside your text write [link text](target), where target is a slug from the <guide_page> blocks or <guide_tree>, or one of the allowed links (refund, key, testflight, buy). Make the link text meaningful, such as the page title or the action ("the **cancellation page**"), never "click here", "link" or a URL. Do not link the same thing twice.
+- Links go INSIDE the sentence, on the words that name the thing. Write the sentence and wrap those words: "You can request it yourself on the [cancellation page](refund)." Never write the sentence plainly and then add the link afterwards, never repeat the words as a separate link, never put a link on its own or at the end of a paragraph, and never link the same thing twice. The target is a slug from the <guide_page> blocks or <guide_tree>, or one of the allowed links (refund, key, testflight, buy). The link text must be the natural words of the sentence (the page title, or the thing being named), never "click here", "link" or a URL.
+- Never refer to a link as "below", "above" or "the link"; the linked words themselves are the link.
 - Never use em dashes or en dashes. Use a comma, a full stop, brackets or the word "to" instead.
 - Formatting: your text is turned into an HTML email. You may use **bold** for names of buttons, menus and tools, and lines starting "- " for short step lists. No emoji, no icons or symbols used as pictures, no other markup, no HTML.
 - If they want a refund or to cancel: be genuinely apologetic, for example "I'm so sorry, I know that's frustrating, but I'm not able to process refunds or cancellations by email", then explain they can request it themselves on the cancellation page, and give the link (links: ["refund"]). Keep it kind and short, and do not ask them to explain why.
@@ -318,6 +319,63 @@ ${body}${buttonsHtml}${guidesHtml}
   return { html, text: parts.join("\n\n") };
 }
 
+// ---- Links belong inside the sentence, on the words that name the thing: "...on the [cancellation page](refund)."
+// The model sometimes writes the sentence plainly and then repeats the words as a link after it. These two steps fix that in code.
+const MD_LINK = /\[([^\]]+)\]\(([^)\s]+)\)/g;
+const lead = (s) => s.replace(/^(?:the|our|a|an|this|that|your)\s+/i, "").trim();
+/** Where `phrase` (or a shorter form of it) first appears as plain text in `s`, outside any link. Returns [start, end] or null. */
+function findPlain(s, phrase, fuzzy = false) {
+  const ranges = [...s.matchAll(MD_LINK)].map((m) => [m.index, m.index + m[0].length]);
+  const lower = s.toLowerCase();
+  const base = lead(phrase), short = base.replace(/\s+(?:guide|page|article)$/i, "").trim();
+  for (const cand of [...new Set(fuzzy ? [base, short] : [base])].filter((c) => c.length >= 5)) {
+    const c = cand.toLowerCase(); let at = -1;
+    while ((at = lower.indexOf(c, at + 1)) !== -1) {
+      const end = at + c.length;
+      const before = at === 0 ? " " : lower[at - 1], after = end >= lower.length ? " " : lower[end];
+      if (!/[a-z0-9]/.test(before) && !/[a-z0-9]/.test(after) && !ranges.some(([a, b]) => at < b && end > a)) return [at, end];
+    }
+  }
+  return null;
+}
+/** A link written after the words it names is moved onto those words; a target already linked earlier keeps only its words. */
+export function relinkInline(text) {
+  const done = new Set();
+  return String(text).split("\n").map((line) => {
+    let out = line;
+    for (let guard = 0; guard < 20; guard++) {
+      const seen = new Set(done); let changed = false;
+      for (const m of out.matchAll(MD_LINK)) {
+        const [full, txt, target] = m, idx = m.index;
+        if (seen.has(target)) { out = out.slice(0, idx) + txt + out.slice(idx + full.length); changed = true; break; }
+        const hit = findPlain(out.slice(0, idx), txt, true);   // repairing a trailing link: a shorter form of its words may match
+        if (hit) {
+          const head = out.slice(0, idx).replace(/\s+(?:the|our|a|an|this|that|your)\s*$/i, "");
+          out = (head.slice(0, hit[0]) + `[${head.slice(hit[0], hit[1])}](${target})` + head.slice(hit[1])).trimEnd() + out.slice(idx + full.length);
+          changed = true; break;
+        }
+        seen.add(target);
+      }
+      if (!changed) break;
+    }
+    for (const m of out.matchAll(MD_LINK)) done.add(m[2]);
+    return out;
+  }).join("\n");
+}
+/** Anything the reply should link to but does not yet: the first plain mention of its name becomes the link. */
+export function autoLink(text, items) {
+  let out = String(text);
+  for (const { target, anchors } of items) {
+    if (out.includes(`](${target})`)) continue;
+    for (const a of anchors) {
+      const hit = findPlain(out, a);
+      if (hit) { out = out.slice(0, hit[0]) + `[${out.slice(hit[0], hit[1])}](${target})` + out.slice(hit[1]); break; }
+    }
+  }
+  return out;
+}
+const LINK_ANCHORS = { refund: ["cancellation page", "cancel page", "refund page"], key: ["licence key page", "key page", "recover your licence key", "recover your key"], testflight: ["testflight link", "testflight invitation", "testflight"], buy: ["buy page"] };
+
 /** A reply that tells the customer the app lacks something. These are only allowed when backed by the guide, the code or the facts. */
 export const DENIAL = /\b(?:the app|maestro pro|it)\s+(?:currently\s+)?(?:does not|doesn't|cannot|can't|isn't able to|is not able to|won't)\s+(?:support|have|offer|include|connect|let|allow|do|provide|work with|integrate)\b|\b(?:isn't|is not|aren't|are not)\s+(?:currently\s+)?(?:a feature|part of the app|in the app|something the app|supported|available in the app|included in the app|available right now|available at the moment)\b|\bthere(?:'s| is) no (?:way|option|setting|feature|button|menu)\b|\b(?:no such|not a) (?:feature|option|setting)\b|\bnot (?:currently )?(?:possible|supported)\b|\b(?:doesn't|does not) exist\b/i;
 const KNOWN_UNAVAILABLE = /\b(scan|scanning|camera|photograph)\b/i;   // listed as "not available right now" in the facts
@@ -433,7 +491,7 @@ export default async function handler(req, res) {
     console.log(JSON.stringify({ evt: "support-evidence", id, guidePages: guide.top.map((p) => p.slug), bestScore: guide.best, coverage: Math.round(guide.coverage * 100) / 100, strong: guide.strong, codeFiles: code.map((c) => c.path), evidence: d.evidence, retried, stillDenies: denied }));
 
     // Guide pages the model chose, checked against the real tree (it never supplies a URL).
-    const pagePairs = [...new Set(d.pages)].filter((slug) => guide.known.has(slug)).slice(0, 3).map((slug) => { const g = guide.known.get(slug); return { title: g.title, url: g.url, summary: FUTURE.test(g.summary) ? "" : firstSentence(g.summary) }; });
+    const pagePairs = [...new Set(d.pages)].filter((slug) => guide.known.has(slug)).slice(0, 3).map((slug) => { const g = guide.known.get(slug); return { slug, title: g.title, url: g.url, summary: FUTURE.test(g.summary) ? "" : firstSentence(g.summary) }; });
     const allowedUrls = [...Object.values(LINKS).map(([, u]) => u), ...[...guide.known.values()].map((g) => g.url)];
     // A link in the model's text is [text](target); the target is only ever one of our own links or a real guide page.
     const resolve = (t) => LINKS[String(t).trim()]?.[1] || guide.known.get(String(t).trim())?.url || (allowedUrls.includes(String(t).trim()) ? String(t).trim() : null);
@@ -450,7 +508,8 @@ export default async function handler(req, res) {
     const safe = escalate || !cleaned ? holding : cleaned;
     const name = firstName(from);
     const aiNotice = await senderInEu(addr(from));
-    const { text, html } = buildEmail({ name, reply: safe, buttons, guides: guideCards, aiNotice, resolve });
+    const inlineReply = escalate ? safe : autoLink(relinkInline(safe), [...d.links.map((k) => ({ target: k, anchors: LINK_ANCHORS[k] || [] })), ...pagePairs.map((g) => ({ target: g.slug, anchors: [g.title, g.title.replace(/\s+guide$/i, "")] }))]);
+    const { text, html } = buildEmail({ name, reply: inlineReply, buttons, guides: guideCards, aiNotice, resolve });
 
     const r = await send({
       from: FROM(), to: [addr(from)], reply_to: SUPPORT,
