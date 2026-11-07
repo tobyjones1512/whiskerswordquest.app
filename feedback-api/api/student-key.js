@@ -1,10 +1,13 @@
 // Maestro Pro students: if GoCardless shows the email has paid, emails them their licence key (never returned to the page,
 // so only the owner of the inbox gets it). Needs RESEND_API_KEY, GOCARDLESS_ACCESS_TOKEN, LICENCE_SECRET.
 import { studentKey, studentHasPaid, studentPlans, customersByEmail, validEmail } from "./_gc.js";
+import owns from "./_student-owns.js";
 
 const ORIGINS = ["https://maestro-pro.app", "https://www.maestro-pro.app", "https://thecaffeinemediacompany.com", "https://www.thecaffeinemediacompany.com"];
 
 export default async function handler(req, res) {
+  // /api/student-owns (the buy pages' "do you already have a licence?" check) is rewritten here by vercel.json, to stay within 12 functions.
+  if (req.query?.fn === "owns") return owns(req, res);
   const origin = req.headers.origin;
   if (ORIGINS.includes(origin)) {
     res.setHeader("Access-Control-Allow-Origin", origin);
