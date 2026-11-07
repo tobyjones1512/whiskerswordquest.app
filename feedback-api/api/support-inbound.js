@@ -56,6 +56,7 @@ Rules:
 - When you give instructions, make them clear and step by step: one short line saying what the steps will achieve, then numbered steps ("1.", "2.", ...), one action per step, each starting with a verb and naming the exact button, menu or setting in **bold**, in the order the customer will see them (no more than 8). Then, if useful, one line saying what they should see when it works. Do not hide steps inside a paragraph.
 - Links go INSIDE the sentence, on the words that name the thing. Write the sentence and wrap those words: "You can request it yourself on the [cancellation page](refund)." Never write the sentence plainly and then add the link afterwards, never repeat the words as a separate link, never put a link on its own or at the end of a paragraph, and never link the same thing twice. The target is a slug from the <guide_page> blocks or <guide_tree>, or one of the allowed links (refund, key, testflight, buy). The link text must be the natural words of the sentence (the page title, or the thing being named), never "click here", "link" or a URL.
 - Never refer to a link as "below", "above" or "the link"; the linked words themselves are the link.
+- Square brackets are only ever used in the form [words](target). Never put words in brackets on their own, and never write a title or name in brackets without a target.
 - Never use em dashes or en dashes. Use a comma, a full stop, brackets or the word "to" instead.
 - Formatting: your text is turned into an HTML email. You may use **bold** for names of buttons, menus and tools, and lines starting "- " for short step lists. No emoji, no icons or symbols used as pictures, no other markup, no HTML.
 - If they want a refund or to cancel: be genuinely apologetic, for example "I'm so sorry, I know that's frustrating, but I'm not able to process refunds or cancellations by email", then explain they can request it themselves on the cancellation page, and give the link (links: ["refund"]). Keep it kind and short, and do not ask them to explain why.
@@ -268,23 +269,25 @@ export function parseBlocks(text) {
   return blocks;
 }
 
+/** Square brackets left around words that did not become a link (the model wrote "[Some title]" with no target): the words stay, the brackets go. */
+const UNLINKED = /\[([^\[\]\n]+)\]/g;
 const linkStyle = `color:${C.deep};font-weight:600;text-decoration:underline`;
 /** Escapes the text, then turns **bold** and [text](target) into HTML. A target is checked by `resolve`; an unknown one keeps its text only. */
 function inlineHtml(t, resolve, used) {
-  return esc(t).replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>").replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (m, txt, target) => {
-    const url = resolve(target.replace(/&amp;/g, "&"));
+  return esc(t).replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>").replace(/\[([^\]]+)\]\s*\(([^)]+)\)/g, (m, txt, target) => {
+    const url = resolve(target.replace(/&amp;/g, "&").trim());
     if (!url) return txt;
     used.add(url);
     return `<a href="${esc(url)}" class="lnk" style="${linkStyle}">${txt}</a>`;
-  });
+  }).replace(UNLINKED, "$1");
 }
 function inlineText(t, resolve, used) {
-  return String(t).replace(/\*\*([^*\n]+)\*\*/g, "$1").replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (m, txt, target) => {
-    const url = resolve(target);
+  return String(t).replace(/\*\*([^*\n]+)\*\*/g, "$1").replace(/\[([^\]]+)\]\s*\(([^)]+)\)/g, (m, txt, target) => {
+    const url = resolve(target.trim());
     if (!url) return txt;
     used.add(url);
     return `${txt} (${url})`;
-  });
+  }).replace(UNLINKED, "$1");
 }
 export const firstSentence = (s) => { const m = /^(.{20,160}?[.!?])(\s|$)/.exec(String(s)); return m ? m[1] : String(s).slice(0, 140); };
 
