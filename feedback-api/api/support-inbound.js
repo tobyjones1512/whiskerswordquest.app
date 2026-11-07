@@ -566,7 +566,7 @@ export default async function handler(req, res) {
     const at = new Date().toISOString(), tid = threadId(addr(from), subject);
     try {
       await recordMessage({ customer: addr(from), name, subject, message: { key: id, dir: "in", by: "customer", at, text: body, msgId } });
-      await recordMessage({ customer: addr(from), name, subject, message: { key: `bot-${id}`, dir: "out", by: "bot", at: new Date().toISOString(), text, ...(scheduledAt && { scheduledAt, resendId }) }, escalate: escalate ? { reason: verdict.reason } : undefined });
+      await recordMessage({ customer: addr(from), name, subject, message: { key: `bot-${id}`, dir: "out", by: "bot", at: new Date().toISOString(), text, ...(resendId && { resendId }), ...(scheduledAt && { scheduledAt }) }, escalate: escalate ? { reason: verdict.reason } : undefined });
     } catch (e) { console.error("thread store", e?.message); }
 
     if (escalate) {

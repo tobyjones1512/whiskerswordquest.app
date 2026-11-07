@@ -44,6 +44,17 @@ export async function suggestOffer(thread, kind) {
 /** Which offer, if any, a reply carries (by its link), so a later "auto" knows what has been sent. */
 export const offerIn = (text) => Object.entries(OFFERS).find(([, o]) => String(text).includes(o.url))?.[0];
 
+/** What Resend says happened to each recent email in the chain (sent, delivered, bounced, ...), added to the reply for display only. */
+export async function addDelivery(thread) {
+  const recent = thread.messages.filter((m) => m.resendId && m.dir === "out" && !m.cancelled && Date.now() - Date.parse(m.at) < 7 * 864e5).slice(-6);
+  await Promise.all(recent.map(async (m) => {
+    try {
+      const r = await fetch(`https://api.resend.com/emails/${encodeURIComponent(m.resendId)}`, { headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}` } });
+      if (r.ok) m.delivery = (await r.json()).last_event || null;
+    } catch { /* the status is a bonus */ }
+  }));
+}
+
 /** What the settings tab shows: the prompt in use, the built-in one, and the reply delay (the environment's REPLY_DELAY applies until the page sets one). */
 export async function settingsView() {
   const s = await loadSettings();
@@ -88,7 +99,7 @@ export default async function handler(req, res) {
     if (req.method === "GET") {
       if (!storeReady()) return res.status(200).json({ storage: false, threads: [] });
       if (req.query.view === "settings") return res.status(200).json({ storage: true, settings: await settingsView() });
-      if (req.query.id) { const thread = await loadThread(req.query.id); return thread ? res.status(200).json({ storage: true, thread }) : res.status(404).json({ error: "No such chain." }); }
+      if (req.query.id) { const thread = await loadThread(req.query.id); if (thread) await addDelivery(thread); return thread ? res.status(200).json({ storage: true, thread }) : res.status(404).json({ error: "No such chain." }); }
       return res.status(200).json({ storage: true, threads: await loadIndex() });
     }
     if (req.method !== "POST") return res.status(405).json({ error: "GET or POST only." });
@@ -160,8 +171,9 @@ export default async function handler(req, res) {
         text: plain, html,
         ...(lastIn && { headers: { "In-Reply-To": lastIn, References: lastIn } }),
       }, `desk-${thread.id}-${crypto.randomUUID()}`);
-      if (!r.ok) return res.status(502).json({ error: `The email could not be sent (Resend ${r.status}).` });
-      const sent = await recordMessage({ threadKey: thread.id, customer: thread.customer, name: thread.name, subject: thread.subject, message: { key: `desk-${crypto.randomUUID()}`, dir: "out", by: "toby", text: plain, guides: guides.map((g) => g.title), ...(offerIn(text) && { offer: offerIn(text) }), ...(close && { closed: caseNumber }) }, status: close ? "done" : "answered" });
+      const out = await r.json().catch(() => ({}));
+      if (!r.ok) return res.status(502).json({ error: `The email could not be sent: ${String(out.message || out.error || "Resend " + r.status).slice(0, 200)}` });
+      const sent = await recordMessage({ threadKey: thread.id, customer: thread.customer, name: thread.name, subject: thread.subject, message: { key: `desk-${crypto.randomUUID()}`, dir: "out", by: "toby", text: plain, guides: guides.map((g) => g.title), ...(out.id && { resendId: out.id }), ...(offerIn(text) && { offer: offerIn(text) }), ...(close && { closed: caseNumber }) }, status: close ? "done" : "answered" });
       return res.status(200).json({ ok: true, thread: sent });
     }
     return res.status(400).json({ error: "Unknown action." });
