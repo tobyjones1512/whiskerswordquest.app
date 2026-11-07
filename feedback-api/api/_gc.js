@@ -75,6 +75,9 @@ const isMaestro = (x) => /maestro pro/i.test(x ?? "");
  *  (students pay £48 a year or £6 a month, schools more): a one-off payment from the last year, or an active
  *  subscription or instalment schedule. */
 export async function studentHasPaid(customerId) {
+  // A cancellation records when access ends on the customer (see student-cancel.js); after that date the key stops working.
+  const until = (await gc("GET", `/customers/${customerId}`)).data.customers?.metadata?.maestro_access_until;
+  if (until && Date.now() > Date.parse(until)) return false;
   // Bacs takes days, so a payment still on its way counts; one that failed, was cancelled or was charged back does not.
   const bad = ["failed", "cancelled", "customer_approval_denied", "charged_back"];
   const pays = ((await gc("GET", `/payments?customer=${customerId}`)).data.payments || []).sort((x, y) => Date.parse(y.created_at) - Date.parse(x.created_at));
