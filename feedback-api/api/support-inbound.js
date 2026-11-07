@@ -34,6 +34,7 @@ export const maskPersonal = (t) => String(t).replace(/[^\s@<>,;]+@[^\s@<>,;]+\.[
 // The only links a reply may contain. The model asks for them by name; it never writes URLs itself.
 export const LINKS = {
   refund: ["Request a refund or cancel your licence", "https://maestro-pro.app/cancel/"],
+  appstore: ["Request a refund from Apple", "https://support.apple.com/en-us/118223"],
   key: ["Get your licence key emailed to you", "https://maestro-pro.app/key.html"],
   testflight: ["Install Maestro Pro with TestFlight", "https://testflight.apple.com/join/rPBpRCu9"],
   buy: ["Buy Maestro Pro Professional", "https://maestro-pro.app/buy/"],
@@ -44,7 +45,8 @@ export const DEFAULT_PROMPT = `You write replies for Maestro Pro customer suppor
 Facts you may use, and nothing else about the product:
 - Professional can be bought on the website: £10 a month on a 12-month contract, or £89 a year. Performer is a subscription started inside the app, managed in the customer's Apple Account.
 - A licence key is emailed to the address that paid. The app asks for it under "Already have a licence key?" on the paywall.
-- 14-day money-back guarantee: refunds and cancellations cannot be done by email; they are requested on the cancellation page.
+- 14-day money-back guarantee: refunds and cancellations cannot be done by email; they are requested on the cancellation page. That is only for licences bought on the website (they come with a licence key by email).
+- Subscriptions bought inside the app through the App Store are paid to Apple, so Apple handles their refunds: the customer requests one from Apple (links: ["appstore"]), and stops renewals in their Apple Account settings. Neither we nor the cancellation page can refund or find them.
 - The app is installed with TestFlight. The guide covers every feature.
 - A licence bought on the website works on up to 3 devices (Education licences, bought for a whole organisation, have no limit). If the app says the limit is reached, the customer removes a device on the devices page (guide page: remove-a-device) and enters the key again.
 - Not available right now: scanning paper music with the camera.
@@ -61,7 +63,8 @@ Rules:
 - Square brackets are only ever used in the form [words](target). Never put words in brackets on their own, and never write a title or name in brackets without a target.
 - Never use em dashes or en dashes. Use a comma, a full stop, brackets or the word "to" instead.
 - Formatting: your text is turned into an HTML email. You may use **bold** for names of buttons, menus and tools, and lines starting "- " for short step lists. No emoji, no icons or symbols used as pictures, no other markup, no HTML.
-- If they want a refund or to cancel: be genuinely apologetic, for example "I'm so sorry, I know that's frustrating, but I'm not able to process refunds or cancellations by email", then explain they can request it themselves on the cancellation page, and give the link (links: ["refund"]). Keep it kind and short, and do not ask them to explain why.
+- If they say they subscribed in the app, through the App Store or their Apple Account (or have no licence key): be kind, explain that Apple handles that refund, and give the Apple link (links: ["appstore"]); do not send them to the cancellation page. If it is not clear where they bought, ask one short question: did they buy on the website (a licence key arrived by email) or subscribe inside the app?
+- If they want a refund or to cancel a website licence: be genuinely apologetic, for example "I'm so sorry, I know that's frustrating, but I'm not able to process refunds or cancellations by email", then explain they can request it themselves on the cancellation page, and give the link (links: ["refund"]). Keep it kind and short, and do not ask them to explain why.
 - If they lost or can't find their licence key: links ["key"]. If they lost the TestFlight or download link: links ["testflight"].
 - <guide_tree> shows how the whole guide is organised (groups, then topics with their slugs). <guide_page> blocks are the pages most likely to help, in Markdown. Answer from them in plain terms, step by step if needed. Never invent a setting, menu or feature that is not in the facts or the pages; if they do not cover the question, do not guess: ask the customer for what you need (see the rule on escalating).
 - Point the customer to 1 to 3 guide pages with the "pages" field, using slugs from the <guide_page> blocks or the <guide_tree>. Only list pages that really help with what they asked.
@@ -390,7 +393,7 @@ export function autoLink(text, items) {
   }
   return out;
 }
-const LINK_ANCHORS = { refund: ["cancellation page", "cancel page", "refund page"], key: ["licence key page", "key page", "recover your licence key", "recover your key"], testflight: ["testflight link", "testflight invitation", "testflight"], buy: ["buy page"] };
+const LINK_ANCHORS = { refund: ["cancellation page", "cancel page", "refund page"], key: ["licence key page", "key page", "recover your licence key", "recover your key"], testflight: ["testflight link", "testflight invitation", "testflight"], buy: ["buy page"], appstore: ["refund from apple", "apple refund", "request a refund from apple", "apple's refund page"] };
 
 /** A reply that tells the customer the app lacks something. These are only allowed when backed by the guide, the code or the facts. */
 export const DENIAL = /\b(?:the app|maestro pro|it)\s+(?:currently\s+)?(?:does not|doesn't|cannot|can't|isn't able to|is not able to|won't)\s+(?:support|have|offer|include|connect|let|allow|do|provide|work with|integrate)\b|\b(?:isn't|is not|aren't|are not)\s+(?:currently\s+)?(?:a feature|part of the app|in the app|something the app|supported|available in the app|included in the app|available right now|available at the moment)\b|\bthere(?:'s| is) no (?:way|option|setting|feature|button|menu)\b|\b(?:no such|not a) (?:feature|option|setting)\b|\bnot (?:currently )?(?:possible|supported)\b|\b(?:doesn't|does not) exist\b/i;
