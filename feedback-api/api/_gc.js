@@ -89,3 +89,17 @@ export async function studentHasPaid(customerId) {
   const inst = (await gc("GET", `/instalment_schedules?customer=${customerId}`)).data.instalment_schedules || [];
   return inst.some((x) => ["pending", "active"].includes(x.status) && isMaestro(x.name));
 }
+
+/** The titles of what this customer is paying for: active Maestro Pro subscriptions and instalment schedules, or, for a
+ *  one-off payment, its description. Used to tell several keys apart in the key email. */
+export async function studentPlans(customerId) {
+  const subs = (await gc("GET", `/subscriptions?customer=${customerId}&status=active`)).data.subscriptions || [];
+  const inst = (await gc("GET", `/instalment_schedules?customer=${customerId}`)).data.instalment_schedules || [];
+  const names = [...subs, ...inst.filter((x) => ["pending", "active"].includes(x.status))].map((x) => x.name).filter(isMaestro);
+  if (!names.length) {
+    const pays = ((await gc("GET", `/payments?customer=${customerId}`)).data.payments || []).filter((p) => isMaestro(p.description) && !p.metadata?.cancellation_fee);
+    pays.sort((x, y) => Date.parse(y.created_at) - Date.parse(x.created_at));
+    if (pays[0]) names.push(pays[0].description);
+  }
+  return [...new Set(names)];
+}
