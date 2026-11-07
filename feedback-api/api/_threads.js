@@ -54,9 +54,11 @@ export async function saveThread(t) {
 
 /** Adds a message to its chain (creating the chain if needed). `message.key` makes a retried webhook a no-op.
  *  `escalate` ({reason}) marks the chain as escalated; a customer message on an escalated chain reopens it. */
-export async function recordMessage({ customer, name, subject, message, escalate, status }) {
-  const id = threadId(customer, subject), now = message.at || new Date().toISOString();
-  const t = (await loadThread(id)) || { id, customer: String(customer).trim().toLowerCase(), name: name || null, subject: String(subject).replace(/^\s*(re|fwd?)\s*:\s*/gi, "").trim() || "(no subject)", escalated: false, status: "bot", createdAt: now, updatedAt: now, messages: [] };
+export async function recordMessage({ customer, name, subject, message, escalate, status, threadKey }) {
+  const now = message.at || new Date().toISOString();
+  const existing = threadKey ? await loadThread(threadKey) : null;   // threadKey: add to a known chain (a re-opened case) whatever the sender and subject
+  const id = existing?.id || threadId(customer, subject);
+  const t = existing || (await loadThread(id)) || { id, customer: String(customer).trim().toLowerCase(), name: name || null, subject: String(subject).replace(/^\s*(re|fwd?)\s*:\s*/gi, "").trim() || "(no subject)", escalated: false, status: "bot", createdAt: now, updatedAt: now, messages: [] };
   if (message.key && t.messages.some((m) => m.key === message.key)) return t;
   if (name && !t.name) t.name = name;
   t.messages.push({ ...message, at: now, text: String(message.text ?? "").slice(0, 8000) });
@@ -67,3 +69,29 @@ export async function recordMessage({ customer, name, subject, message, escalate
   await saveThread(t);
   return t;
 }
+
+// ---- Settings the desk can change (the bot prompt and the reply delay), one small JSON file.
+const SETTINGS = "support/settings.json";
+export async function loadSettings() { return (await readJson(SETTINGS)) || {}; }
+export async function saveSettings(patch) { const next = { ...(await loadSettings()), ...patch }; await writeJson(SETTINGS, next); return next; }
+
+// ---- Case numbers. A closed chain gets one, shown in the closing email; support@ uses it to find the chain again.
+const CASE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";   // no I, O, 0 or 1, so a number is easy to read out
+const CASE_FILE = (n) => `support/cases/${n}.json`;
+export const newCaseNumber = () => { const pick = (k) => Array.from({ length: k }, () => CASE_CHARS[crypto.randomInt(CASE_CHARS.length)]).join(""); return `MP-${pick(4)}-${pick(4)}`; };
+/** "mp 7k2q 9xdf" or "MP-7K2Q-9XDF" -> "MP-7K2Q-9XDF", or null. */
+export const normCase = (t) => { const m = /\bMP[\s-]?([A-HJ-NP-Z2-9]{4})[\s-]?([A-HJ-NP-Z2-9]{4})\b/i.exec(String(t ?? "")); return m ? `MP-${m[1].toUpperCase()}-${m[2].toUpperCase()}` : null; };
+/** Gives the chain a unique case number (keeping the one it has). Returns the number. */
+export async function assignCase(thread) {
+  if (thread.caseNumber) return thread.caseNumber;
+  for (let i = 0; i < 20; i++) {
+    const n = newCaseNumber();
+    if (await readJson(CASE_FILE(n))) continue;
+    await writeJson(CASE_FILE(n), { id: thread.id, at: new Date().toISOString() });
+    thread.caseNumber = n;
+    return n;
+  }
+  throw new Error("Could not make a unique case number.");
+}
+/** The chain id behind a case number, or null. */
+export async function findCase(text) { const n = normCase(text); return n ? { caseNumber: n, id: (await readJson(CASE_FILE(n)))?.id || null } : null; }

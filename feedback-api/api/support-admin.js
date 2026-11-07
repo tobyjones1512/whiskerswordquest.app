@@ -2,8 +2,25 @@
 // environment variable on Vercel, sent as "Authorization: Bearer <password>". Lists the stored email chains, opens one, sends Toby's reply
 // from escalations@maestro-pro.app in the same email design as the support bot, and sets a chain's status.
 import crypto from "node:crypto";
-import { buildEmail, guideTree, LINKS, send, firstSentence, ESCALATIONS } from "./support-inbound.js";
-import { loadIndex, loadThread, recordMessage, saveThread, storeReady } from "./_threads.js";
+import { buildEmail, guideTree, LINKS, send, firstSentence, ESCALATIONS, DEFAULT_PROMPT } from "./support-inbound.js";
+import { loadIndex, loadThread, recordMessage, saveThread, storeReady, loadSettings, saveSettings, assignCase } from "./_threads.js";
+
+const NOREPLY = "noreply@maestro-pro.app";
+const SUPPORT = "support@maestro-pro.app";
+
+/** What the settings tab shows: the prompt in use, the built-in one, and the reply delay (the environment's REPLY_DELAY applies until the page sets one). */
+export async function settingsView() {
+  const s = await loadSettings();
+  const delay = s.delay || { enabled: process.env.REPLY_DELAY === "on", minMinutes: 10, maxMinutes: 45 };
+  return { prompt: s.prompt || DEFAULT_PROMPT, defaultPrompt: DEFAULT_PROMPT, custom: Boolean(s.prompt), delay, delayFromPage: Boolean(s.delay) };
+}
+/** Checks a prompt before it is saved: the bot's code needs a JSON reply, and the model's context is small. Returns an error message or null. */
+export function promptProblem(p) {
+  if (p.length < 200) return "That prompt is too short.";
+  if (p.length > 14000) return "That prompt is too long. The model can only read about 14,000 characters of it.";
+  if (!/"reply"/.test(p) || !/json/i.test(p)) return "Keep the line that tells the model to reply with only JSON, including the reply, pages, links, escalate, refund_problem, issue and evidence fields.";
+  return null;
+}
 
 const ORIGINS = ["https://maestro-pro.app", "https://www.maestro-pro.app"];
 const FROM = () => process.env.ESCALATIONS_FROM || `Maestro Pro Escalations <${ESCALATIONS}>`;
@@ -34,12 +51,29 @@ export default async function handler(req, res) {
   try {
     if (req.method === "GET") {
       if (!storeReady()) return res.status(200).json({ storage: false, threads: [] });
+      if (req.query.view === "settings") return res.status(200).json({ storage: true, settings: await settingsView() });
       if (req.query.id) { const thread = await loadThread(req.query.id); return thread ? res.status(200).json({ storage: true, thread }) : res.status(404).json({ error: "No such chain." }); }
       return res.status(200).json({ storage: true, threads: await loadIndex() });
     }
     if (req.method !== "POST") return res.status(405).json({ error: "GET or POST only." });
     if (!storeReady()) return res.status(503).json({ error: "Storage is not connected." });
     const b = typeof req.body === "string" ? JSON.parse(req.body || "{}") : req.body || {};
+
+    if (b.action === "settings") {
+      const patch = {};
+      if ("prompt" in b) {
+        if (b.prompt === null || String(b.prompt).trim() === String(DEFAULT_PROMPT).trim()) patch.prompt = null;   // back to the built-in prompt
+        else { const p = String(b.prompt).replace(/\r\n/g, "\n"); const bad = promptProblem(p); if (bad) return res.status(400).json({ error: bad }); patch.prompt = p; }
+      }
+      if (b.delay) {
+        const min = Math.round(Number(b.delay.minMinutes)), max = Math.round(Number(b.delay.maxMinutes));
+        if (!(min >= 0 && max >= min && max <= 720)) return res.status(400).json({ error: "Use whole minutes, with the longest at least the shortest and no more than 720." });
+        patch.delay = { enabled: b.delay.enabled === true, minMinutes: min, maxMinutes: max };
+      }
+      await saveSettings(patch);
+      return res.status(200).json({ ok: true, settings: await settingsView() });
+    }
+
     const thread = await loadThread(b.id);
     if (!thread) return res.status(404).json({ error: "No such chain." });
 
@@ -74,16 +108,19 @@ export default async function handler(req, res) {
       const { pages } = await guideTree();
       const known = new Map(pages.map((p) => [p.slug, p]));
       const guides = [...new Set([].concat(b.guides || []).map(String))].filter((s) => known.has(s)).slice(0, 6).map((s) => { const g = known.get(s); return { slug: s, title: g.title, url: g.url, summary: firstSentence(g.summary || "") }; });
-      const { html, text: plain } = buildEmail({ name: thread.name, reply: text, guides, resolve: makeResolve(known), label: "Escalations", contact: ESCALATIONS, signoff: "Maestro Pro Escalations Team" });
+      // "Send & mark as done": the chain gets a unique case number, replies to the email go nowhere, and the email says how to re-open the case.
+      const close = b.close === true, caseNumber = close ? await assignCase(thread) : "";
+      if (close) await saveThread(thread);
+      const { html, text: plain } = buildEmail({ name: thread.name, reply: text, guides, resolve: makeResolve(known), label: "Escalations", contact: close ? SUPPORT : ESCALATIONS, signoff: "Maestro Pro Escalations Team", caseNumber });
       const lastIn = [...thread.messages].reverse().find((m) => m.dir === "in" && m.msgId)?.msgId;
       const r = await send({
-        from: FROM(), to: [thread.customer], reply_to: ESCALATIONS,
+        from: FROM(), to: [thread.customer], reply_to: close ? NOREPLY : ESCALATIONS,
         subject: /^re:/i.test(thread.subject) ? thread.subject : `Re: ${thread.subject}`,
         text: plain, html,
         ...(lastIn && { headers: { "In-Reply-To": lastIn, References: lastIn } }),
       }, `desk-${thread.id}-${crypto.randomUUID()}`);
       if (!r.ok) return res.status(502).json({ error: `The email could not be sent (Resend ${r.status}).` });
-      const sent = await recordMessage({ customer: thread.customer, name: thread.name, subject: thread.subject, message: { key: `desk-${crypto.randomUUID()}`, dir: "out", by: "toby", text: plain, guides: guides.map((g) => g.title) }, status: "answered" });
+      const sent = await recordMessage({ threadKey: thread.id, customer: thread.customer, name: thread.name, subject: thread.subject, message: { key: `desk-${crypto.randomUUID()}`, dir: "out", by: "toby", text: plain, guides: guides.map((g) => g.title), ...(close && { closed: caseNumber }) }, status: close ? "done" : "answered" });
       return res.status(200).json({ ok: true, thread: sent });
     }
     return res.status(400).json({ error: "Unknown action." });

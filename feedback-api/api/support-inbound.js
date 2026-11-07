@@ -16,7 +16,7 @@
 //   ADMIN_PASSWORD          the password for the desk page (api/support-admin.js). ESCALATIONS_FROM optional, default "Maestro Pro Escalations <escalations@maestro-pro.app>".
 import crypto from "node:crypto";
 import { gc, customersByEmail } from "./_gc.js";
-import { recordMessage, threadId } from "./_threads.js";
+import { recordMessage, threadId, loadSettings, findCase } from "./_threads.js";
 
 export const config = { api: { bodyParser: false } }; // the signature is over the exact bytes Resend sent
 
@@ -39,7 +39,8 @@ export const LINKS = {
   buy: ["Buy Maestro Pro Professional", "https://maestro-pro.app/buy/"],
 };
 
-const SYSTEM = `You write replies for Maestro Pro customer support. Maestro Pro is a music-score app for iPhone, iPad and Mac made by one person, Toby Jones.
+/** The prompt the support bot starts from. The desk page can replace it; {{LINKS}} is filled in with the allowed link names. */
+export const DEFAULT_PROMPT = `You write replies for Maestro Pro customer support. Maestro Pro is a music-score app for iPhone, iPad and Mac made by one person, Toby Jones.
 Facts you may use, and nothing else about the product:
 - Professional can be bought on the website: £10 a month on a 12-month contract, or £89 a year. Performer is a subscription started inside the app, managed in the customer's Apple Account.
 - A licence key is emailed to the address that paid. The app asks for it under "Already have a licence key?" on the paywall.
@@ -69,7 +70,8 @@ Rules:
 - Escalating to a person is rare. Always try to help yourself: answer from the facts and excerpts, give the right link, or ask the customer one or two short clarifying questions (which device, which iOS or macOS version, what exactly they see, what they tapped) when you lack detail. Set escalate to true ONLY when the customer is making a complaint: they are expressing real dissatisfaction or frustration with the app, the service, a charge, or how they have been treated, and want it put right. Do NOT escalate for anything else: not for bugs, technical problems, billing questions, legal, privacy or data requests, unusual questions, things you are unsure about, or questions you cannot answer. Ask clarifying questions instead. (A customer who has replied twice in the same conversation is escalated automatically, except on refund, licence key and TestFlight questions, so you never need to decide that.) If you escalate, still fill "issue".
 - Set refund_problem to true ONLY when the customer says a refund has not come through, has not arrived yet, or is wrong in some way (wrong amount, taken twice, charged after cancelling). A customer who is simply asking how to get a refund or cancel is NOT a refund problem: send them to the cancellation page. Otherwise leave refund_problem false.
 - "issue" (base it on the whole conversation) is a short lower-case phrase that finishes the sentence "I'm sorry to hear ...", for example "that the tuner can't hear you" or "you can't access your account". No full stop, no URLs, under 100 characters. It is only used if you escalate.
-Reply with only JSON: {"reply": string, "pages": string[], "links": string[], "escalate": boolean, "refund_problem": boolean, "issue": string, "evidence": "guide" | "code" | "facts" | "none"}. "evidence" is where your answer came from ("none" only if you made no claim about the app). Allowed links: ${Object.keys(LINKS).join(", ")}.`;
+Reply with only JSON: {"reply": string, "pages": string[], "links": string[], "escalate": boolean, "refund_problem": boolean, "issue": string, "evidence": "guide" | "code" | "facts" | "none"}. "evidence" is where your answer came from ("none" only if you made no claim about the app). Allowed links: {{LINKS}}.`;
+export const promptFor = (custom) => String(custom || DEFAULT_PROMPT).replaceAll("{{LINKS}}", Object.keys(LINKS).join(", "));
 
 // ---- Reference material: the guide's tree (guide/tree.json) and Markdown pages (guide/<slug>.md) on the website, cached for an hour.
 // Pages are picked by matching the email against each page's title, keywords and summary, so only a few short pages are sent to the model.
@@ -241,7 +243,7 @@ export function dedupeSentences(t) {
 const polish = (t) => dedupeSentences(noDashes(noEmoji(t)));
 
 /** A random delay of 10 to 45 minutes, as an ISO time for Resend's scheduled sending (nothing waits inside this function). */
-export const replyTime = (now = Date.now(), rnd = Math.random()) => new Date(now + (10 + rnd * 35) * 60000).toISOString();
+export const replyTime = (now = Date.now(), rnd = Math.random(), min = 10, max = 45) => new Date(now + (min + rnd * (max - min)) * 60000).toISOString();
 
 const SIGNOFF = "Best regards,\nMaestro Pro Support";
 /** Drops a greeting or sign-off the model wrote despite being told not to, so ours is the only one. */
@@ -293,7 +295,7 @@ export const firstSentence = (s) => { const m = /^(.{20,160}?[.!?])(\s|$)/.exec(
 
 /** Builds the customer's email, HTML and plain text, from the model's reply. Links inside the reply are written [text](target) and every
  *  target is checked by `resolve`; the model never supplies a URL. `buttons` are [label, url] actions, `guides` are {title, url, summary}. */
-export function buildEmail({ name, reply, buttons = [], guides = [], aiNotice = false, resolve = () => null, label = "Support", contact = SUPPORT, signoff = "Maestro Pro Support" }) {
+export function buildEmail({ name, reply, buttons = [], guides = [], aiNotice = false, resolve = () => null, label = "Support", contact = SUPPORT, signoff = "Maestro Pro Support", caseNumber = "" }) {
   const blocks = parseBlocks(reply), used = new Set(), hi = `Hi ${name || "there"},`;
   const text = (t) => inlineText(t, resolve, new Set());
   // ----- html body
@@ -319,13 +321,14 @@ export function buildEmail({ name, reply, buttons = [], guides = [], aiNotice = 
 <tr><td class="card" style="background:${C.paper};padding:32px 34px 30px;font:16px/1.6 ${FONT};color:${C.ink}">
 <p class="ink" style="margin:0 0 18px;font:700 22px/1.3 ${SERIF};color:${C.ink}">${esc(hi)}</p>
 ${body}${buttonsHtml}${guidesHtml}
-<p class="ink" style="margin:26px 0 0;font:16px/1.5 ${FONT};color:${C.ink}">Best regards,<br><strong>${esc(signoff)}</strong></p>
+<p class="ink" style="margin:26px 0 0;font:16px/1.5 ${FONT};color:${C.ink}">Best regards,<br><strong>${esc(signoff)}</strong></p>${caseNumber ? `
+<p class="muted" style="margin:20px 0 0;padding-top:14px;border-top:1px solid ${C.rule};font:13px/1.55 ${FONT};color:${C.muted}">This case has been closed. Responses to this email will not be received. To re-open the case, please email <a href="mailto:${SUPPORT}" class="lnk" style="${linkStyle}">support</a>. Case number: <strong>${esc(caseNumber)}</strong></p>` : ""}
 </td></tr>
 <tr><td class="foot" style="background:${C.foot};border-radius:0 0 14px 14px;padding:18px 34px;font:12px/1.5 ${FONT};color:#7A6E5B">Maestro Pro, made by <a href="https://thecaffeinemediacompany.com" style="color:#7A6E5B">Toby Jones</a> &middot; <a href="https://maestro-pro.app/" style="color:#7A6E5B">maestro-pro.app</a> &middot; <a href="mailto:${contact}" style="color:#7A6E5B">${contact}</a>${aiNotice ? `<div style="margin-top:8px;font-size:10px;line-height:1.3;color:#8A8070">${AI_NOTICE}</div>` : ""}</td></tr>
 </table></td></tr></table></body></html>`;
   // ----- plain text
   const parts = [hi, ...blocks.map((b) => (b.type === "steps" ? b.items.map((l, i) => `${i + 1}. ${text(l)}`).join("\n") : b.type === "bullets" ? b.items.map((l) => `- ${text(l)}`).join("\n") : b.items.map(text).join("\n"))),
-    ...(btns.length ? [btns.map(([l, u]) => `${l}: ${u}`).join("\n")] : []), ...(gds.length ? [gds.map((g) => `Guide: ${g.title} (${g.url})`).join("\n")] : []), `Best regards,\n${signoff}`, ...(aiNotice ? [AI_NOTICE] : [])];
+    ...(btns.length ? [btns.map(([l, u]) => `${l}: ${u}`).join("\n")] : []), ...(gds.length ? [gds.map((g) => `Guide: ${g.title} (${g.url})`).join("\n")] : []), `Best regards,\n${signoff}`, ...(caseNumber ? [`This case has been closed. Responses to this email will not be received. To re-open the case, please email support (${SUPPORT}). Case number: ${caseNumber}`] : []), ...(aiNotice ? [AI_NOTICE] : [])];
   return { html, text: parts.join("\n\n") };
 }
 
@@ -420,6 +423,9 @@ export function signoffsQuoted(e = {}) {
   return (t.match(/best regards,[\s>]*maestro pro support/gi) || []).length;
 }
 
+/** Words that ask for a closed case to be opened again, or say the problem is not fixed. Only used when the email also carries a real case number. */
+export const REOPEN = /\b(?:re-?open\w*|open (?:it|this|that|the|my|our)?\s*(?:case|ticket|issue)?\s*(?:up )?again|(?:case|ticket|issue) (?:is |was )?(?:not|n't) (?:been )?(?:closed|resolved|fixed|solved)|still (?:not|isn'?t|doesn'?t|haven'?t|hasn'?t|having|happening|broken|an issue|a problem|can'?t|cannot|no)\b|not (?:been )?(?:fixed|resolved|solved|working)|(?:didn'?t|did not|doesn'?t|does not) (?:fix|work|help|solve|resolve)|(?:issue|problem) (?:is )?(?:back|persists?|continues?|remains?))/i;
+
 /** A customer saying their refund has not come through, or is wrong. Checked on the new email only (not the quoted history). */
 export const REFUND_PROBLEM = /\b(?:my|the|a)\s+refund\b[^.\n]{0,60}\b(?:not|hasn'?t|haven'?t|yet|still|never|missing|wrong|incorrect|short|late|delayed|twice)\b|\b(?:still|not|haven'?t|hasn'?t|never|yet to)\b[^.\n]{0,40}\b(?:receiv\w*|got|seen)\b[^.\n]{0,15}\b(?:my|the|a)\s+refund\b|\brefund\b[^.\n]{0,40}\b(?:wrong amount|too (?:little|much)|not (?:the )?(?:right|correct) amount)\b/i;
 /** Who gets escalated. Refund, key and TestFlight questions always have an answer (a link), so the second-reply and complaint rules skip them;
@@ -445,7 +451,7 @@ export const plain = (e) => {
   return t.slice(0, 3000);
 };
 
-async function draft(subject, body, guide = { top: [], outline: "" }, code = [], earlier = "", extra = "") {
+async function draft(subject, body, guide = { top: [], outline: "" }, code = [], earlier = "", extra = "", system = promptFor()) {
   const r = await fetch(LLM_URL(), {
     method: "POST",
     headers: { Authorization: `Bearer ${process.env.LLM_API_KEY}`, "Content-Type": "application/json" },
@@ -454,7 +460,7 @@ async function draft(subject, body, guide = { top: [], outline: "" }, code = [],
       max_tokens: 1500, // headroom: a reasoning model spends part of this thinking before it answers
       temperature: 0.3,
       messages: [
-        { role: "system", content: SYSTEM },
+        { role: "system", content: system },
         { role: "user", content: `${code.map((c) => `<app_code path="${c.path}">\n${c.body}\n</app_code>`).join("\n")}\n${guide.outline ? `<guide_tree>\n${guide.outline}\n</guide_tree>\n` : ""}${guide.top.map((p) => `<guide_page slug="${p.slug}" title="${p.title}">\n${p.md}\n</guide_page>`).join("\n")}\nSubject: ${maskPersonal(subject)}\n\n${earlier ? `<earlier_messages>\n${maskPersonal(earlier)}\n</earlier_messages>\n` : ""}<customer_email>\n${maskPersonal(body)}\n</customer_email>${extra ? `\n<verification>\n${extra}\n</verification>` : ""}` },
       ],
     }),
@@ -497,13 +503,20 @@ export default async function handler(req, res) {
     const body = plain(full);
     Object.assign(ctx, { from, subject, body });
     const msgId = evt.data.message_id || full.message_id;
+    // A customer asking to re-open a closed case, and quoting its case number, goes straight to Toby with the old case put back on the desk.
+    if (REOPEN.test(`${subject}\n${body}`)) {
+      const hit = await findCase([subject, full.text || "", String(full.html || "").replace(/<[^>]+>/g, " ")].join("\n")).catch(() => null);
+      if (hit?.id) return reopenCase({ res, id, from, subject, body, msgId, hit });
+    }
     const guide = await relevantPages(subject, body);
     let code = await relevantCode(subject, body, !guide.strong);   // no clear guide match: search the app's code as well
     const headerReplies = customerReplies(full.headers), signoffs = signoffsQuoted(full);
     const replies = Math.max(headerReplies, signoffs);
     console.log(JSON.stringify({ evt: "support-thread", id, replies, headerReplies, signoffs, headerNames: Object.keys(headerMap(full.headers)).filter((k) => /^(references|in-reply-to)$/.test(k)) }));
     const earlier = replies ? quoted(full) : "";
-    let d = await draft(subject, body, guide, code, earlier);
+    const settings = await loadSettings().catch(() => ({}));   // what the desk page has set: the prompt and the reply delay
+    const system = promptFor(settings.prompt);
+    let d = await draft(subject, body, guide, code, earlier, "", system);
     // Second look: a reply that says the app lacks something is checked again against the guide and the code before it is sent.
     // If it still says so after that check, it is sent: the bot has looked in both.
     let denied = deniesWithoutEvidence(d.reply), retried = false;
@@ -511,7 +524,7 @@ export default async function handler(req, res) {
       retried = true;
       code = await relevantCode(subject, body, true);
       const covers = guide.top.map((p) => `${p.title} (${p.slug})`).join("; ") || "none matched closely";
-      d = await draft(subject, body, guide, code, earlier, `Your last answer told the customer that something is not available or does not exist. Check again. Guide pages that may cover this: ${covers}. Read them and the app code, and answer from them: a feature the guide describes is a real feature of the app. If, after checking the guide pages, the guide tree and the app code, you find no sign of the feature, you may tell the customer plainly and kindly that it isn't available right now, and offer what they can do instead.`);
+      d = await draft(subject, body, guide, code, earlier, `Your last answer told the customer that something is not available or does not exist. Check again. Guide pages that may cover this: ${covers}. Read them and the app code, and answer from them: a feature the guide describes is a real feature of the app. If, after checking the guide pages, the guide tree and the app code, you find no sign of the feature, you may tell the customer plainly and kindly that it isn't available right now, and offer what they can do instead.`, system);
       denied = deniesWithoutEvidence(d.reply);
     }
     console.log(JSON.stringify({ evt: "support-evidence", id, guidePages: guide.top.map((p) => p.slug), bestScore: guide.best, coverage: Math.round(guide.coverage * 100) / 100, strong: guide.strong, codeFiles: code.map((c) => c.path), evidence: d.evidence, retried, stillDenies: denied }));
@@ -536,7 +549,9 @@ export default async function handler(req, res) {
     const inlineReply = escalate ? safe : autoLink(relinkInline(safe), [...d.links.map((k) => ({ target: k, anchors: LINK_ANCHORS[k] || [] })), ...pagePairs.map((g) => ({ target: g.slug, anchors: [g.title, g.title.replace(/\s+guide$/i, "")] }))]);
     const { text, html } = buildEmail({ name, reply: inlineReply, buttons, guides: guideCards, aiNotice, resolve, contact: escalate ? ESCALATIONS : SUPPORT });
 
-    const scheduledAt = process.env.REPLY_DELAY === "on" ? replyTime() : undefined;
+    // Reply delay: the desk page setting if there is one, otherwise REPLY_DELAY=on from the environment (10 to 45 minutes).
+    const dl = settings.delay, delayOn = dl ? dl.enabled === true : process.env.REPLY_DELAY === "on";
+    const scheduledAt = delayOn ? replyTime(Date.now(), Math.random(), dl?.minMinutes ?? 10, dl?.maxMinutes ?? 45) : undefined;
     const r = await send({
       from: FROM(), to: [addr(from)], reply_to: escalate ? ESCALATIONS : SUPPORT,   // once escalated, the customer's next email goes to the desk
       subject: /^re:/i.test(subject) ? subject : `Re: ${subject}`,
@@ -573,6 +588,24 @@ export default async function handler(req, res) {
     }, `support-fwd-${id}`).catch(() => {});
     if (addr(ctx.from)) await recordMessage({ customer: addr(ctx.from), name: firstName(ctx.from), subject: ctx.subject, message: { key: id, dir: "in", by: "customer", text: ctx.body }, escalate: { reason: "The automatic reply failed" } }).catch(() => {});
     res.status(200).json({ ok: false });
+  }
+}
+
+/** The customer wants a closed case opened again. The old chain is put back on the desk as open (so Toby sees everything said before), the
+ *  customer is told it has been escalated, and Toby is emailed a link. */
+async function reopenCase({ res, id, from, subject, body, msgId, hit }) {
+  const tid = hit.id, text = `I’m sorry the issue has not been resolved. I have re-opened case ${hit.caseNumber} and escalated it, and someone will get back to you shortly.`;
+  try {
+    try { await recordMessage({ threadKey: tid, customer: addr(from), name: firstName(from), subject, message: { key: id, dir: "in", by: "customer", from: addr(from), text: body, msgId, reopen: hit.caseNumber }, escalate: { reason: `Case ${hit.caseNumber} re-opened by the customer` } }); }
+    catch (e) { console.error("thread store", e?.message); }
+    const mail = buildEmail({ name: firstName(from), reply: text, contact: ESCALATIONS, aiNotice: false });
+    await send({ from: FROM(), to: [addr(from)], reply_to: ESCALATIONS, subject: /^re:/i.test(subject) ? subject : `Re: ${subject}`, text: mail.text, html: mail.html, ...(msgId && { headers: { "In-Reply-To": msgId, References: msgId } }) }, `support-reopen-${id}`);
+    await send({ from: FROM(), to: [OWNER], reply_to: addr(from), subject: `Escalation raised: case ${hit.caseNumber} re-opened`, text: `A customer has asked to re-open case ${hit.caseNumber}.\n\nOpen it and reply: ${deskLink(tid)}\n\nFrom: ${from}\nSubject: ${subject}\n\n${body}` }, `support-reopen-notice-${id}`).catch(() => {});
+    return res.status(200).json({ ok: true, escalated: true, reopened: hit.caseNumber });
+  } catch (err) {
+    console.error(err);
+    await send({ from: FROM(), to: [OWNER], subject: `Escalation raised: case ${hit.caseNumber} re-opened`, text: `A customer asked to re-open case ${hit.caseNumber} but the automatic reply failed (${String(err.message).slice(0, 100)}). Open it: ${deskLink(tid)}\n\nFrom: ${from}\n\n${body}` }, `support-reopen-fwd-${id}`).catch(() => {});
+    return res.status(200).json({ ok: false });
   }
 }
 
