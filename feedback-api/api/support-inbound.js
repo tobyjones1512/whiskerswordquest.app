@@ -8,13 +8,15 @@
 //   APP_CODE_REPO           optional, "owner/name" of the PRIVATE app repo, so the model can understand how the app behaves.
 //   APP_CODE_TOKEN          a fine-grained GitHub token with read-only "Contents" access to that one repo.
 //   APP_CODE_DIRS           optional, comma-separated folders to include (default: the whole repo).
+//   AI_NOTICE_UNKNOWN       optional "1": also show the AI notice when the sender's country can't be told (default: only for EU senders).
 //   SUPPORT_FROM            optional, default "Maestro Pro Support <support@maestro-pro.app>".
 import crypto from "node:crypto";
+import { gc, customersByEmail } from "./_gc.js";
 
 export const config = { api: { bodyParser: false } }; // the signature is over the exact bytes Resend sent
 
 const OWNER = "hello@thecaffeinemediacompany.com";
-const FORWARD_TO = "toby@thecaffeinemediacompany.com"; // where an email goes when the automatic reply fails
+const FORWARD_TO = OWNER; // where an email goes when the automatic reply fails
 const SUPPORT = "support@maestro-pro.app";
 const FROM = () => process.env.SUPPORT_FROM || `Maestro Pro Support <${SUPPORT}>`;
 const LLM_URL = () => `${(process.env.LLM_BASE_URL || "https://api.pawan.krd/v1").replace(/\/$/, "")}/chat/completions`;
@@ -44,13 +46,14 @@ Rules:
 - Formatting: your text is turned into an HTML email. You may use **bold** for names of buttons, menus and tools, put a few relevant emoji in-line with the text where they help the customer (for example ⚙️ for Settings, 🎤 for the microphone, 🎵 for a score), and use lines starting "- " for short step lists. No other markup, no HTML.
 - If they want a refund or to cancel: say it is handled on the cancellation page and cannot be done by email (links: ["refund"]).
 - If they lost or can't find their licence key: links ["key"]. If they lost the TestFlight or download link: links ["testflight"].
-- You may be given <guide_page> excerpts from the official guide. Use them to answer how-to and fault questions, in plain terms for a user, step by step if needed. Never invent a setting, menu or feature that is not in the facts or the excerpts; if they do not cover the question, escalate.
-- You may also be given <app_code> excerpts from the app's source. Their only purpose is to help you give accurate directions: use them to work out where a feature lives and what it is called on screen (menus, buttons, tabs, settings, tools, gestures) and the real steps to use it, then tell the customer exactly where to tap or click and what to do, in plain words. Use the on-screen names a customer would see. NEVER reference code in any way: no file names, class or function names, variables, "the code", "the source" or "I can see". Never say you have access to the code. If the excerpts don't show how to do something, say what you are sure of from the guide, or escalate. If the excerpts suggest the customer has hit a real bug, tell them Toby will look into it and set escalate to true.
+- You may be given <guide_page> excerpts from the official guide. Use them to answer how-to and fault questions, in plain terms for a user, step by step if needed. Never invent a setting, menu or feature that is not in the facts or the excerpts; if they do not cover the question, do not guess: ask the customer for what you need (see the rule on escalating).
+- You may also be given <app_code> excerpts from the app's source. Their only purpose is to help you give accurate directions: use them to work out where a feature lives and what it is called on screen (menus, buttons, tabs, settings, tools, gestures) and the real steps to use it, then tell the customer exactly where to tap or click and what to do, in plain words. Use the on-screen names a customer would see. NEVER reference code in any way: no file names, class or function names, variables, "the code", "the source" or "I can see". Never say you have access to the code. If the excerpts don't show how to do something, say what you are sure of from the guide and ask a clarifying question. The app's icons are Apple SF Symbols. When the excerpts name one (systemName: "..."), describe the icon in words a customer would use and add the closest emoji in-line, because the symbol itself cannot be put in an email. Examples: gearshape = the gear icon ⚙️; mic or mic.fill = the microphone icon 🎤; play.fill = the play button ▶️; pause.fill = the pause button ⏸️; plus = the plus button ➕; magnifyingglass = the search icon 🔍; square.and.arrow.up = the share icon (a box with an arrow pointing up) 📤; ellipsis or ellipsis.circle = the three-dots menu ⋯; trash = the bin icon 🗑️; pencil = the pencil icon ✏️; metronome = the metronome icon 🎼; tuningfork = the tuner icon 🎵; speaker.wave.2 = the sound icon 🔊; folder = the folder icon 📁; xmark = the close (X) button ✖️. For any other symbol, describe it plainly and only use an emoji if one clearly matches.
 - Add the "guide" link when you used an excerpt (it points at the page), and "troubleshooting" for faults.
 - Never promise refunds, discounts, dates or features. Never ask for card details or passwords.
 - Do not write any URLs yourself; use the links field.
-- If you are not sure, or it is a complaint, a bug report needing investigation, a legal or data request, or anything else, set escalate to true and write a short holding reply saying Toby will look at it personally.
-Reply with only JSON: {"reply": string, "links": string[], "escalate": boolean}. Allowed links: ${Object.keys(LINKS).join(", ")}.`;
+- Escalating to a person is a LAST RESORT. Always try first to help: answer from the facts and excerpts, give the right link, or ask the customer one or two short clarifying questions (which device, which iOS or macOS version, what exactly they see, what they tapped) when you lack detail. Never escalate just because you are unsure, a question is unusual, or the customer is cross: apologise and help. Set escalate to true ONLY when the customer needs something only Toby can do and you cannot help yourself: a complaint needing a personal decision, a legal, privacy or data request, a bug you cannot work around, or a billing problem you cannot resolve with the cancellation or key links. If you escalate, still fill "issue".
+- "issue" is a short lower-case phrase that finishes the sentence "I'm sorry to hear ...", for example "that the tuner can't hear you" or "you can't access your account". No full stop, no URLs, under 100 characters. It is only used if you escalate.
+Reply with only JSON: {"reply": string, "links": string[], "escalate": boolean, "issue": string}. Allowed links: ${Object.keys(LINKS).join(", ")}.`;
 
 // ---- Reference material: the public guide at maestro-pro.app/guide, fetched on demand and cached for an hour.
 // Only the two pages that best match the email are sent to the model, so a reply costs a few thousand tokens, not the whole guide.
@@ -168,6 +171,23 @@ export function firstName(from) {
   return /^[\p{L}][\p{L}'’-]{0,29}$/u.test(w) ? w.charAt(0).toUpperCase() + w.slice(1) : null;
 }
 
+// ---- EU notice. A sender is treated as in the EU if their GoCardless customer record says so, or, with no record, their email
+// address ends in an EU country domain (.de, .fr, ...). Otherwise no notice (set AI_NOTICE_UNKNOWN=1 to show it for unknowns too).
+const EU = new Set("AT BE BG HR CY CZ DK EE FI FR DE GR HU IE IT LV LT LU MT NL PL PT RO SK SI ES SE".split(" "));
+export const euTld = (a) => { const t = String(a).split(".").pop().toLowerCase(); return t === "eu" || EU.has(t.toUpperCase()); };
+export async function senderInEu(address) {
+  if (process.env.GOCARDLESS_ACCESS_TOKEN) {
+    try {
+      for (const id of await customersByEmail(address)) {
+        const c = (await gc("GET", `/customers/${id}`)).data.customers?.country_code;
+        if (c) return EU.has(c);
+      }
+    } catch { /* fall through to the address */ }
+  }
+  return euTld(address) || process.env.AI_NOTICE_UNKNOWN === "1";
+}
+const AI_NOTICE = "This message may have been written using AI";
+
 const SIGNOFF = "Best regards,\nMaestro Pro Support";
 /** Drops a greeting or sign-off the model wrote despite being told not to, so ours is the only one. */
 export const trimModelFraming = (t) => String(t).replace(/^\s*(hi|hello|hey|dear)\b[^\n]*\n+/i, "").replace(/\n+\s*(best regards|kind regards|regards|best wishes|many thanks|thanks|cheers|yours sincerely|sincerely)\b[\s\S]*$/i, "").trim();
@@ -176,14 +196,14 @@ const esc = (x) => String(x).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&l
 const inline = (t) => esc(t).replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>");
 
 /** Our own HTML from the model's escaped text: paragraphs, **bold**, "- " lists, emoji untouched. The model never supplies markup. */
-export function replyHtml(name, body, linkPairs) {
+export function replyHtml(name, body, linkPairs, aiNotice = false) {
   const blocks = String(body).split(/\n{2,}/).map((b) => {
     const lines = b.split("\n").filter((l) => l.trim());
     if (lines.length && lines.every((l) => /^\s*[-•]\s+/.test(l))) return `<ul style="margin:0 0 14px;padding-left:20px">${lines.map((l) => `<li style="margin:3px 0">${inline(l.replace(/^\s*[-•]\s+/, ""))}</li>`).join("")}</ul>`;
     return `<p style="margin:0 0 14px">${lines.map(inline).join("<br>")}</p>`;
   });
   const links = linkPairs.length ? `<p style="margin:0 0 14px">${linkPairs.map(([label, url]) => `${esc(label)}: <a href="${esc(url)}">${esc(url)}</a>`).join("<br>")}</p>` : "";
-  return `<div style="font:15px/1.5 -apple-system,Segoe UI,Helvetica,Arial,sans-serif;color:#1b140d"><p style="margin:0 0 14px">Hi ${esc(name || "there")},</p>${blocks.join("")}${links}<p style="margin:0">Best regards,<br>Maestro Pro Support</p></div>`;
+  return `<div style="font:15px/1.5 -apple-system,Segoe UI,Helvetica,Arial,sans-serif;color:#1b140d"><p style="margin:0 0 14px">Hi ${esc(name || "there")},</p>${blocks.join("")}${links}<p style="margin:0">Best regards,<br>Maestro Pro Support</p>${aiNotice ? `<p style="margin:16px 0 0;font-size:10px;line-height:1.3;color:#8a8070">${AI_NOTICE}</p>` : ""}</div>`;
 }
 
 const plain = (e) => {
@@ -211,7 +231,7 @@ async function draft(subject, body, pages = [], code = []) {
   const content = (await r.json()).choices?.[0]?.message?.content || "";
   let j = {};
   try { j = JSON.parse(/\{[\s\S]*\}/.exec(content)?.[0] || "{}"); } catch { /* escalate below */ }
-  return { reply: String(j.reply || "").trim(), links: Array.isArray(j.links) ? j.links.filter((k) => LINKS[k]) : [], escalate: j.escalate === true || !j.reply };
+  return { reply: String(j.reply || "").trim(), links: Array.isArray(j.links) ? j.links.filter((k) => LINKS[k]) : [], escalate: j.escalate === true || !j.reply, issue: String(j.issue || "").replace(/https?:\/\/\S+/g, "").replace(/\s+/g, " ").replace(/[.!]+$/, "").trim().slice(0, 100) };
 }
 
 const send = (payload, idem) =>
@@ -248,13 +268,18 @@ export default async function handler(req, res) {
 
     // "guide" points at the best-matching page when there is one.
     const links = { ...LINKS, ...(pages[0] && { guide: [`Guide: ${pages[0].title}`, pages[0].url] }) };
-    const linkPairs = d.links.map((k) => links[k]);
+    // Escalation is a last resort. Refund, key and TestFlight questions always have an answer (a link), so they are never escalated.
+    const escalate = d.escalate && !d.links.some((k) => ["refund", "key", "testflight"].includes(k));
+    const linkPairs = escalate ? [] : d.links.map((k) => links[k]);
     // Strip any URL the model wrote itself that isn't one of ours, and any greeting/sign-off of its own.
-    const holding = "Thanks for getting in touch. I've passed your message to Toby, who will look at it personally and reply as soon as he can.";
-    const safe = trimModelFraming((d.reply || holding).replace(/https?:\/\/\S+/g, (u) => (Object.values(links).some(([, l]) => u.startsWith(l)) ? u : ""))) || holding;
+    const holding = `I’m sorry to hear ${d.issue || "that you’ve run into a problem"}. I will escalate the issue and someone will get back to you shortly.`;
+    // Strip any URL the model wrote itself that isn't one of ours, and any greeting/sign-off of its own.
+    const cleaned = trimModelFraming(d.reply.replace(/https?:\/\/\S+/g, (u) => (Object.values(links).some(([, l]) => u.startsWith(l)) ? u : "")));
+    const safe = escalate || !cleaned ? holding : cleaned;
     const name = firstName(from);
-    const text = [`Hi ${name || "there"},`, safe.replace(/\*\*/g, ""), linkPairs.map(([l, u]) => `${l}: ${u}`).join("\n"), SIGNOFF].filter(Boolean).join("\n\n");
-    const html = replyHtml(name, safe, linkPairs);
+    const aiNotice = await senderInEu(addr(from));
+    const text = [`Hi ${name || "there"},`, safe.replace(/\*\*/g, ""), linkPairs.map(([l, u]) => `${l}: ${u}`).join("\n"), SIGNOFF, ...(aiNotice ? [AI_NOTICE] : [])].filter(Boolean).join("\n\n");
+    const html = replyHtml(name, safe, linkPairs, aiNotice);
 
     const r = await send({
       from: FROM(), to: [addr(from)], bcc: [OWNER], reply_to: SUPPORT,
@@ -264,14 +289,14 @@ export default async function handler(req, res) {
     }, `support-reply-${id}`);
     if (!r.ok) throw new Error("Resend " + r.status);
 
-    if (d.escalate) {
+    if (escalate) {
       await send({
         from: FROM(), to: [OWNER], reply_to: addr(from),
         subject: `Support needs you: ${subject}`,
-        text: `From: ${from}\nSubject: ${subject}\n\n${body}\n\n---\nThe assistant replied with a holding message:\n${safe}`,
+        text: `From: ${from}\nSubject: ${subject}\n\n${body}\n\n---\nThe assistant told the customer it was escalating, and said:\n${safe}`,
       }, `support-escalate-${id}`).catch(() => {});
     }
-    res.status(200).json({ ok: true, escalated: d.escalate });
+    res.status(200).json({ ok: true, escalated: escalate });
   } catch (err) {
     console.error(err);
     // The automatic reply failed (the model API, Resend, anything): forward the customer's email to Toby so it is answered by hand.
