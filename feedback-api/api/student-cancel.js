@@ -7,7 +7,11 @@
 //   day 15+   no refund. Annual: cancel the subscription and the mandate; access runs to the end of the year paid for.
 //             Monthly: charge 1 month + 50% of the rest of the 12-month term through the mandate (amounts taken from the
 //             bills on GoCardless), then cancel subscriptions and instalments but KEEP the mandate.
-// Retention plan: Professional at £5/month, rolling (monthly subscription of RETENTION_PENCE with no count or end date).
+// Retention offers, never published on the site, only sent in the cancellation response and email:
+//  - Professional at £5/month, rolling, offered with every cancellation (but not on the page when a yearly plan has
+//    more than 1.5 months left, only in the email);
+//  - Professional at £2.50/month, rolling, the final offer, shown to someone cancelling the £5 plan.
+// A rolling plan is a monthly subscription of one of those amounts with no count or end date; cancelling it is free and instant.
 // Offered after a refund. It has no refund window, no 14-day wait and no fee: cancelling stops it straight away.
 // Needs GOCARDLESS_ACCESS_TOKEN, LICENCE_SECRET, RESEND_API_KEY. GoCardless refunds must be enabled on the account.
 import { gc, parseStudentKey } from "./_gc.js";
@@ -16,6 +20,14 @@ const ORIGINS = ["https://maestro-pro.app", "https://www.maestro-pro.app", "http
 const TERM_MONTHS = 12;
 const RETENTION_PENCE = 500;
 const RETENTION_URL = "https://pay.gocardless.com/BRT01M6STVRK3EGKX9FKBBSXD912J";
+const FINAL_PENCE = 250;
+const FINAL_URL = "https://pay.gocardless.com/BRT01M6SXT2JKHB119DCQS72QZ0TG";
+const OFFER_P = { title: "Before you go: Professional for £5 a month.", text: "Keep every Professional feature, including the score editor and version history, for half the usual monthly price. It rolls month to month, and you can cancel any time with no fee and no waiting period.", cta: "Keep Professional for £5 a month", url: RETENTION_URL };
+const OFFER_FINAL = { title: "Before you go: Professional for £2.50 a month.", text: "Keep every Professional feature, including the score editor and version history, for a quarter of the usual monthly price. It rolls month to month, and you can cancel any time with no fee and no waiting period.", cta: "Keep Professional for £2.50 a month", url: FINAL_URL };
+/** The offer for this cancellation: none for someone leaving the £2.50 plan (the last offer), £2.50 for someone leaving the £5 plan, otherwise £5. */
+const offerFor = (a) => (a.activeSubs.some((x) => x.amount === FINAL_PENCE && x.interval_unit === "monthly") ? null : a.activeSubs.some((x) => x.amount === RETENTION_PENCE && x.interval_unit === "monthly" && !x.count && !x.end_date) ? OFFER_FINAL : OFFER_P);
+/** On the page, not for a yearly plan with more than 1.5 months still to run (the email always has it). */
+const offerOnPage = (a, now = Date.now()) => (a.outcome === "cancel" && !a.monthly && a.valid.length && a.accessUntil - now > 45 * DAY ? null : offerFor(a));
 const DAY = 864e5;
 const OWNER = "hello@thecaffeinemediacompany.com";
 const MIN_WORDS = 20;
@@ -58,6 +70,7 @@ const TEST_WORLDS = {
   "MPS-TEST-MONTHLY-FEE": { subs: [tSub("monthly", 1000)], pays: [tPay(70, "paid_out", 1000), tPay(40, "paid_out", 1000), tPay(10, "paid_out", 1000), tPay(-20, "pending_submission", 1000, "PMNEXT")] }, // 3 paid: fee 50.00
   "MPS-TEST-MONTHLY-LATE": { subs: [tSub("monthly", 1000)], pays: [tPay(20, "paid_out", 1000), tPay(-10, "pending_submission", 1000, "PMNEXT")] }, // 1 paid: fee 60.00
   "MPS-TEST-ROLLING": { subs: [tSub("monthly", RETENTION_PENCE)], pays: [tPay(3, "submitted", RETENTION_PENCE)] }, // retention plan: free, instant
+  "MPS-TEST-ROLLING-FINAL": { subs: [tSub("monthly", FINAL_PENCE)], pays: [tPay(3, "submitted", FINAL_PENCE)] }, // the £2.50 plan: free, instant, no offer
   "MPS-TEST-CANCELLED": { mandate: "cancelled", subs: [{ ...tSub("yearly", 8900), status: "cancelled" }], pays: [tPay(40, "paid_out", 8900)] }, // already cancelled
 };
 const testKey = (key) => (process.env.MAESTRO_TEST_KEYS === "1" && TEST_WORLDS[String(key ?? "").trim().toUpperCase()] ? String(key).trim().toUpperCase() : null);
@@ -98,7 +111,7 @@ async function assess(customerId, now = Date.now()) {
   if (!activeSubs.length && !activeScheds.length && !pending.length && !activeMandates.length) return { ...base, outcome: "already_cancelled" };
 
   // The rolling £5 plan cancels at once, free, whatever day it is.
-  if (activeSubs.length && activeSubs.every((s) => s.interval_unit === "monthly" && s.amount === RETENTION_PENCE && !s.count && !s.end_date)) {
+  if (activeSubs.length && activeSubs.every((s) => s.interval_unit === "monthly" && [RETENTION_PENCE, FINAL_PENCE].includes(s.amount) && !s.count && !s.end_date)) {
     const last = valid.filter((p) => IN_FLIGHT.includes(p.status)).pop();
     const paidTo = last ? addMonths(Date.parse(last.charge_date), 1) : 0;
     return { ...base, monthly: true, outcome: "cancel_rolling", fee: 0, refund: 0, accessUntil: Math.max(midnight(now), midnight(paidTo)) };
@@ -227,8 +240,9 @@ async function sendConfirmation(a, test) {
     refunded ? `Last day you can use your licence: ${dateStr(a.accessUntil)}. Your licence key stopped working today.` : `Last day you can use your licence: ${dateStr(a.accessUntil)}.`,
     "No further payments will be taken.",
   ];
-  // Same retention offer as on the cancellation page; only after a refund.
-  const offer = refunded ? "Before you go: keep Professional for £5 a month. Every Professional feature, including the score editor and version history, for half the usual monthly price. It rolls month to month, and you can cancel any time with no fee and no waiting period." : "";
+  // The retention offer (always in the email, even when the page leaves it out for a yearly plan with a long way to run).
+  const o = offerFor(a);
+  const offer = o ? `${o.title} ${o.text}` : "";
   const note = "If you didn't ask for this, email hello@thecaffeinemediacompany.com. This inbox is not monitored, so please do not reply to this email.";
   const testNote = test ? `This is a test: no real customer was cancelled. It was sent to you instead of ${customerEmail || "the customer"}.` : "";
   await fetch("https://api.resend.com/emails", {
@@ -238,8 +252,8 @@ async function sendConfirmation(a, test) {
       from: process.env.CONTACT_FROM || "Maestro Pro <noreply@thecaffeinemediacompany.com>",
       to: [to],
       subject: `${test ? "[TEST] " : ""}Your Maestro Pro licence has been cancelled`,
-      text: [testNote, ...lines, ...(offer ? ["", offer, RETENTION_URL] : []), "", note].filter((l, i) => l || i).join("\n"),
-      html: [testNote && `<p><i>${esc(testNote)}</i></p>`, ...lines.map((l) => `<p>${esc(l)}</p>`), offer && `<p>${esc(offer)}</p><p><a href="${RETENTION_URL}">Keep Professional for £5 a month</a></p>`, `<p>${esc(note)}</p>`].filter(Boolean).join(""),
+      text: [testNote, ...lines, ...(o ? ["", offer, o.url] : []), "", note].filter((l, i) => l || i).join("\n"),
+      html: [testNote && `<p><i>${esc(testNote)}</i></p>`, ...lines.map((l) => `<p>${esc(l)}</p>`), o && `<p>${esc(offer)}</p><p><a href="${o.url}">${esc(o.cta)}</a></p>`, `<p>${esc(note)}</p>`].filter(Boolean).join(""),
     }),
   }).catch(() => {});
 }
@@ -282,8 +296,8 @@ export default async function handler(req, res) {
       : a.monthly ? "Your licence has been cancelled." : `Your subscription is cancelled and nothing more will be taken. Your licence key will work until ${dateStr(a.accessUntil)}.`;
     await sendConfirmation(a, test);
     if (!test) await tellOwner(a, String(key).trim().toUpperCase(), skip ? "(The customer chose not to give a reason.)" : reason, msg);
-    // The retention offer is only ever sent to someone who has just been refunded, never published on the site.
-    const offer = a.outcome === "refund" ? { title: "Before you go: Professional for £5 a month.", text: "Keep every Professional feature, including the score editor and version history, for half the usual monthly price. It rolls month to month, and you can cancel any time with no fee and no waiting period.", cta: "Keep Professional for £5 a month", url: RETENTION_URL } : undefined;
+    // The retention offer is only ever sent in this response and the email, never published on the site.
+    const offer = offerOnPage(a) || undefined;
     res.status(200).json({ ok: true, done: true, outcome: a.outcome, message: msg, offer });
   } catch (err) {
     if (err.status) return res.status(err.status).json({ error: err.message });
