@@ -479,13 +479,14 @@ export default async function handler(req, res) {
     console.log(JSON.stringify({ evt: "support-thread", id, replies, headerReplies, signoffs, headerNames: Object.keys(headerMap(full.headers)).filter((k) => /^(references|in-reply-to)$/.test(k)) }));
     const earlier = replies ? quoted(full) : "";
     let d = await draft(subject, body, guide, code, earlier);
-    // Second look: a reply that says the app lacks something is checked again against the guide and the code before it can be sent.
+    // Second look: a reply that says the app lacks something is checked again against the guide and the code before it is sent.
+    // If it still says so after that check, it is sent: the bot has looked in both.
     let denied = deniesWithoutEvidence(d.reply), retried = false;
     if (denied) {
       retried = true;
       code = await relevantCode(subject, body, true);
       const covers = guide.top.map((p) => `${p.title} (${p.slug})`).join("; ") || "none matched closely";
-      d = await draft(subject, body, guide, code, earlier, `Your last answer told the customer that something is not available or does not exist. Check again. Guide pages that may cover this: ${covers}. Read them and the app code, and answer from them: a feature the guide describes is a real feature of the app. Only say something is not available if a guide page, the code or the facts explicitly say so. If you still cannot find it, do not deny it: say you can't confirm it, or ask one clarifying question, or set escalate to true.`);
+      d = await draft(subject, body, guide, code, earlier, `Your last answer told the customer that something is not available or does not exist. Check again. Guide pages that may cover this: ${covers}. Read them and the app code, and answer from them: a feature the guide describes is a real feature of the app. If, after checking the guide pages, the guide tree and the app code, you find no sign of the feature, you may tell the customer plainly and kindly that it isn't available right now, and offer what they can do instead.`);
       denied = deniesWithoutEvidence(d.reply);
     }
     console.log(JSON.stringify({ evt: "support-evidence", id, guidePages: guide.top.map((p) => p.slug), bestScore: guide.best, coverage: Math.round(guide.coverage * 100) / 100, strong: guide.strong, codeFiles: code.map((c) => c.path), evidence: d.evidence, retried, stillDenies: denied }));
@@ -498,8 +499,7 @@ export default async function handler(req, res) {
     // Escalation is a last resort. Refund, key and TestFlight questions always have an answer (a link), so they are never escalated.
     // A customer who has now replied twice is escalated whatever the topic.
     const repeat = replies >= 2;
-    const unsupported = denied;   // would still have told the customer something is missing, with nothing to back it up
-    const escalate = repeat || unsupported || (d.escalate && !d.links.some((k) => ["refund", "key", "testflight"].includes(k)));
+    const escalate = repeat || (d.escalate && !d.links.some((k) => ["refund", "key", "testflight"].includes(k)));
     const buttons = escalate ? [] : d.links.map((k) => LINKS[k]), guideCards = escalate ? [] : pagePairs;
     // Strip any URL the model wrote itself that isn't one of ours, and any greeting/sign-off of its own.
     const holding = noDashes(noEmoji(`I’m sorry to hear ${d.issue || "that you’ve run into a problem"}. I will escalate the issue and someone will get back to you shortly.`));
@@ -524,7 +524,7 @@ export default async function handler(req, res) {
       await send({
         from: FROM(), to: [OWNER], reply_to: addr(from),
         subject: `Support needs you: ${subject}`,
-        text: `${repeat ? "Escalated because the customer has replied twice.\n\n" : ""}${unsupported ? "Escalated because the assistant could not find support in the guide or the app code, and would otherwise have told the customer that something is not available. Please check it.\n\n" : ""}From: ${from}\nSubject: ${subject}\n\n${body}\n\n---\nThe assistant told the customer it was escalating, and said:\n${safe}`,
+        text: `${repeat ? "Escalated because the customer has replied twice.\n\n" : ""}From: ${from}\nSubject: ${subject}\n\n${body}\n\n---\nThe assistant told the customer it was escalating, and said:\n${safe}`,
       }, `support-escalate-${id}`).catch(() => {});
     }
     res.status(200).json({ ok: true, escalated: escalate });
