@@ -227,6 +227,8 @@ async function sendConfirmation(a, test) {
     refunded ? `Last day you can use your licence: ${dateStr(a.accessUntil)}. Your licence key stopped working today.` : `Last day you can use your licence: ${dateStr(a.accessUntil)}.`,
     "No further payments will be taken.",
   ];
+  // Same retention offer as on the cancellation page; only after a refund.
+  const offer = refunded ? "Before you go: keep Professional for £5 a month. Every Professional feature, including the score editor and version history, for half the usual monthly price. It rolls month to month, and you can cancel any time with no fee and no waiting period." : "";
   const note = "If you didn't ask for this, email hello@thecaffeinemediacompany.com. This inbox is not monitored, so please do not reply to this email.";
   const testNote = test ? `This is a test: no real customer was cancelled. It was sent to you instead of ${customerEmail || "the customer"}.` : "";
   await fetch("https://api.resend.com/emails", {
@@ -236,8 +238,8 @@ async function sendConfirmation(a, test) {
       from: process.env.CONTACT_FROM || "Maestro Pro <noreply@thecaffeinemediacompany.com>",
       to: [to],
       subject: `${test ? "[TEST] " : ""}Your Maestro Pro licence has been cancelled`,
-      text: [testNote, ...lines, "", note].filter((l, i) => l || i).join("\n"),
-      html: [testNote && `<p><i>${esc(testNote)}</i></p>`, ...lines.map((l) => `<p>${esc(l)}</p>`), `<p>${esc(note)}</p>`].filter(Boolean).join(""),
+      text: [testNote, ...lines, ...(offer ? ["", offer, RETENTION_URL] : []), "", note].filter((l, i) => l || i).join("\n"),
+      html: [testNote && `<p><i>${esc(testNote)}</i></p>`, ...lines.map((l) => `<p>${esc(l)}</p>`), offer && `<p>${esc(offer)}</p><p><a href="${RETENTION_URL}">Keep Professional for £5 a month</a></p>`, `<p>${esc(note)}</p>`].filter(Boolean).join(""),
     }),
   }).catch(() => {});
 }
