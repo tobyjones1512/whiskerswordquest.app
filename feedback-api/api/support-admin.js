@@ -4,6 +4,7 @@
 import crypto from "node:crypto";
 import { buildEmail, guideTree, LINKS, send, firstSentence, ESCALATIONS, DEFAULT_PROMPT } from "./support-inbound.js";
 import { OFFER_P, OFFER_FINAL } from "./student-cancel.js";
+import { buildKeyEmail, KEY_FROM, KEY_SUBJECT } from "./_key-email.js";
 import { loadIndex, loadThread, recordMessage, saveThread, storeReady, loadSettings, saveSettings, assignCase } from "./_threads.js";
 
 const NOREPLY = "noreply@maestro-pro.app";
@@ -101,6 +102,17 @@ export default async function handler(req, res) {
       }
       await saveSettings(patch);
       return res.status(200).json({ ok: true, settings: await settingsView() });
+    }
+
+    if (b.action === "test-key-email") {
+      // A sample of the licence key email (with a sample key that works nowhere), so its look can be checked in a real inbox.
+      const to = String(b.to ?? "").trim().toLowerCase();
+      if (!/^[^\s@<>,;]+@[^\s@<>,;]+\.[^\s@<>,;]+$/.test(to) || to.length > 200) return res.status(400).json({ error: "Enter a valid email address." });
+      const mail = buildKeyEmail([{ key: "MPS-SAMPLE-0000-0000", plans: ["Maestro Pro Professional"] }]);
+      const r = await send({ from: KEY_FROM(), to: [to], subject: `[Test] ${KEY_SUBJECT}`, text: mail.text, html: mail.html }, `keytest-${crypto.randomUUID()}`);
+      const out = await r.json().catch(() => ({}));
+      if (!r.ok) return res.status(502).json({ error: `The test email could not be sent: ${String(out.message || out.error || "Resend " + r.status).slice(0, 200)}` });
+      return res.status(200).json({ ok: true, id: out.id || null });
     }
 
     const thread = await loadThread(b.id);
