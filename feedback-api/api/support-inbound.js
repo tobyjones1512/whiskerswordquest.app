@@ -26,8 +26,8 @@ const SUPPORT = "support@maestro-pro.app";
 export const ESCALATIONS = "escalations@maestro-pro.app";
 export const deskLink = (id) => `https://maestro-pro.app/escalations/${id ? "?t=" + id : ""}`;
 export const FROM = () => process.env.SUPPORT_FROM || `Maestro Pro Support <${SUPPORT}>`;
-const LLM_URL = () => `${(process.env.LLM_BASE_URL || "https://api.pawan.krd/v1").replace(/\/$/, "")}/chat/completions`;
-const MODEL = () => process.env.LLM_MODEL || "openai/gpt-oss-20b";
+export const LLM_URL = () => `${(process.env.LLM_BASE_URL || "https://api.pawan.krd/v1").replace(/\/$/, "")}/chat/completions`;
+export const MODEL = () => process.env.LLM_MODEL || "openai/gpt-oss-20b";
 // The model has no use for the customer's contact details, so they are masked before the text leaves for a third-party API.
 export const maskPersonal = (t) => String(t).replace(/[^\s@<>,;]+@[^\s@<>,;]+\.[^\s@<>,;]+/g, "[email]").replace(/\+?\d[\d\s().-]{8,}\d/g, "[number]");
 

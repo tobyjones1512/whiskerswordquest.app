@@ -22,8 +22,8 @@ const RETENTION_PENCE = 500;
 const RETENTION_URL = "https://pay.gocardless.com/BRT01M6STVRK3EGKX9FKBBSXD912J";
 const FINAL_PENCE = 250;
 const FINAL_URL = "https://pay.gocardless.com/BRT01M6SXT2JKHB119DCQS72QZ0TG";
-const OFFER_P = { title: "Before you go: Professional for £5 a month.", text: "Keep every Professional feature, including the score editor and version history, for half the usual monthly price. It rolls month to month, and you can cancel any time with no fee and no waiting period.", cta: "Keep Professional for £5 a month", url: RETENTION_URL };
-const OFFER_FINAL = { title: "Before you go: Professional for £2.50 a month.", text: "Keep every Professional feature, including the score editor and version history, for a quarter of the usual monthly price. It rolls month to month, and you can cancel any time with no fee and no waiting period.", cta: "Keep Professional for £2.50 a month", url: FINAL_URL };
+export const OFFER_P = { title: "Before you go: Professional for £5 a month.", text: "Keep every Professional feature, including the score editor and version history, for half the usual monthly price. It rolls month to month, and you can cancel any time with no fee and no waiting period.", cta: "Keep Professional for £5 a month", url: RETENTION_URL };
+export const OFFER_FINAL = { title: "Before you go: Professional for £2.50 a month.", text: "Keep every Professional feature, including the score editor and version history, for a quarter of the usual monthly price. It rolls month to month, and you can cancel any time with no fee and no waiting period.", cta: "Keep Professional for £2.50 a month", url: FINAL_URL };
 /** The offer for this cancellation: none for someone leaving the £2.50 plan (the last offer), £2.50 for someone leaving the £5 plan, otherwise £5. */
 const offerFor = (a) => (a.activeSubs.some((x) => x.amount === FINAL_PENCE && x.interval_unit === "monthly") ? null : a.activeSubs.some((x) => x.amount === RETENTION_PENCE && x.interval_unit === "monthly" && !x.count && !x.end_date) ? OFFER_FINAL : OFFER_P);
 /** On the page, not for a yearly plan with more than 1.5 months still to run (the email always has it). */
