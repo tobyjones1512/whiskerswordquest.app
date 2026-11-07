@@ -201,6 +201,13 @@ async function execute(a, customerId, now = Date.now()) {
   await gc("PUT", `/customers/${customerId}`, { customers: { metadata: { ...(a.customer.metadata || {}), maestro_access_until: new Date(a.accessUntil).toISOString() } } });
 }
 
+/** Ends a customer's licence today (stops payments, cancels mandates, key stops working). Used by the desk's forced refund; skips the fee and refund rules. */
+export async function endLicence(customerId) {
+  const a = await assess(customerId);
+  if (a.outcome === "already_cancelled") return;
+  await execute({ ...a, outcome: "cancel", fee: 0, refund: 0, accessUntil: midnight(Date.now()) }, customerId);
+}
+
 const planTitles = (a) => {
   const named = [...a.activeSubs, ...a.activeScheds].map((x) => x.name);
   return [...new Set((named.length ? named : a.valid.map((p) => p.description)).filter(Boolean))].join(", ") || "Maestro Pro";

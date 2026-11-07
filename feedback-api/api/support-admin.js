@@ -5,6 +5,7 @@ import crypto from "node:crypto";
 import { buildEmail, guideTree, LINKS, send, firstSentence, ESCALATIONS, DEFAULT_PROMPT } from "./support-inbound.js";
 import { OFFER_P, OFFER_FINAL } from "./student-cancel.js";
 import { buildKeyEmail, KEY_FROM, KEY_SUBJECT } from "./_key-email.js";
+import { listPayments, forceRefund } from "./_force-refund.js";
 import { loadActivity, seedActivity, TEST_EMAIL } from "./_activity.js";
 import { loadIndex, loadThread, recordMessage, saveThread, storeReady, loadSettings, saveSettings, assignCase } from "./_threads.js";
 
@@ -83,6 +84,12 @@ export default async function handler(req, res) {
     if (req.method === "GET") {
       if (!storeReady()) return res.status(200).json({ storage: false, threads: [] });
       if (req.query.view === "settings") return res.status(200).json({ storage: true, settings: await settingsView() });
+      if (req.query.view === "payments") {
+        const t = await loadThread(req.query.id);
+        if (!t) return res.status(404).json({ error: "No such chain." });
+        try { return res.status(200).json({ ok: true, email: t.customer, payments: await listPayments(t.customer) }); }
+        catch (e) { console.error(e); return res.status(502).json({ error: "Couldn't reach GoCardless to list the payments." }); }
+      }
       if (req.query.id) { const thread = await loadThread(req.query.id); let activity = []; if (thread) { await addDelivery(thread); activity = await loadActivity(thread.customer).catch(() => []); } return thread ? res.status(200).json({ storage: true, thread, activity }) : res.status(404).json({ error: "No such chain." }); }
       return res.status(200).json({ storage: true, threads: await loadIndex() });
     }
@@ -126,6 +133,16 @@ export default async function handler(req, res) {
 
     const thread = await loadThread(b.id);
     if (!thread) return res.status(404).json({ error: "No such chain." });
+
+    if (b.action === "force-refund") {
+      try {
+        const r = await forceRefund({ email: thread.customer, paymentId: String(b.paymentId || ""), amount: b.amount, endLicence: b.endLicence === true, note: b.note });
+        return res.status(200).json({ ok: true, ...r, activity: await loadActivity(thread.customer).catch(() => []) });
+      } catch (e) {
+        if (e.status) return res.status(e.status).json({ error: e.message });
+        throw e;
+      }
+    }
 
     if (b.action === "status") {
       if (!["open", "answered", "done"].includes(b.status)) return res.status(400).json({ error: "Bad status." });
