@@ -1,7 +1,8 @@
 // Maestro Pro support inbox: Resend forwards each email sent to support@maestro-pro.app here (an "email.received" webhook).
-// A small OpenAI model drafts a short reply, which is sent from the same address, with Toby on bcc. Anything it can't
+// A small model, reached through the Pawan.Krd OpenAI-compatible API, drafts a short reply, which is sent from the same address, with Toby on bcc. Anything it can't
 // answer is passed to Toby instead. Environment variables on Vercel (never in the repo):
-//   OPENAI_API_KEY          OpenAI key. OPENAI_MODEL overrides the model (default gpt-5-nano, the cheapest of the small models).
+//   LLM_API_KEY            key for the model API (a "pk-..." key from pawan.krd/keys).
+//   LLM_MODEL              optional model id (default openai/gpt-oss-20b). LLM_BASE_URL optional (default https://api.pawan.krd/v1).
 //   RESEND_API_KEY          already used by the other endpoints.
 //   RESEND_WEBHOOK_SECRET   the signing secret ("whsec_...") of the Resend webhook that points at this endpoint.
 //   APP_CODE_REPO           optional, "owner/name" of the PRIVATE app repo, so the model can understand how the app behaves.
@@ -15,7 +16,10 @@ export const config = { api: { bodyParser: false } }; // the signature is over t
 const OWNER = "hello@thecaffeinemediacompany.com";
 const SUPPORT = "support@maestro-pro.app";
 const FROM = () => process.env.SUPPORT_FROM || `Maestro Pro Support <${SUPPORT}>`;
-const MODEL = () => process.env.OPENAI_MODEL || "gpt-5-nano";
+const LLM_URL = () => `${(process.env.LLM_BASE_URL || "https://api.pawan.krd/v1").replace(/\/$/, "")}/chat/completions`;
+const MODEL = () => process.env.LLM_MODEL || "openai/gpt-oss-20b";
+// The model has no use for the customer's contact details, so they are masked before the text leaves for a third-party API.
+export const maskPersonal = (t) => String(t).replace(/[^\s@<>,;]+@[^\s@<>,;]+\.[^\s@<>,;]+/g, "[email]").replace(/\+?\d[\d\s().-]{8,}\d/g, "[number]");
 
 // The only links a reply may contain. The model asks for them by name; it never writes URLs itself.
 const LINKS = {
@@ -84,7 +88,8 @@ async function relevantPages(subject, body) {
 }
 
 // ---- Reference material 2: the app's own source, read from a private GitHub repo. Inert unless APP_CODE_REPO and APP_CODE_TOKEN are set.
-// Only the three files whose names best match the email are fetched, redacted of anything secret-looking, and cut to 6,000 characters.
+// Only the three files whose names best match the email are fetched, redacted of anything secret-looking, and cut to 3,500 characters.
+// (The model's context window is 16,384 tokens, so the excerpts, the email and the reply all have to fit: roughly 8,000 tokens in total.)
 const CODE_EXT = /\.(swift|m|mm|h|kt|java|js|ts|tsx|py|md|txt|strings)$/i;
 const CODE_SKIP = /(^|\/)(\.git|node_modules|Pods|Carthage|build|DerivedData|\.build|Assets\.xcassets|Tests?|fastlane)(\/|$)|(\.env|secret|credential|entitlements|xcconfig|\.p12|\.pem|\.key|\.mobileprovision)/i;
 let codeCache = { at: 0, files: [] };
@@ -113,7 +118,7 @@ async function relevantCode(subject, body) {
     .filter((x) => x.n > 0).sort((a, b) => b.n - a.n).slice(0, 3);
   const out = [];
   for (const { f } of top) {
-    try { out.push({ path: f.path, body: redact(await (await gh(`contents/${encodeURI(f.path)}`, true)).text()).slice(0, 6000) }); } catch { /* skip */ }
+    try { out.push({ path: f.path, body: redact(await (await gh(`contents/${encodeURI(f.path)}`, true)).text()).slice(0, 3500) }); } catch { /* skip */ }
   }
   return out;
 }
@@ -157,26 +162,28 @@ export function shouldIgnore(from, headers = {}) {
 const plain = (e) => {
   let t = e.text || String(e.html || "").replace(/<(style|script)[\s\S]*?<\/\1>/gi, " ").replace(/<br\s*\/?>|<\/p>/gi, "\n").replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&");
   t = t.split("\n").filter((l) => !l.trim().startsWith(">")).join("\n").replace(/\n{3,}/g, "\n\n").trim();
-  return t.slice(0, 4000);
+  return t.slice(0, 3000);
 };
 
 async function draft(subject, body, pages = [], code = []) {
-  const r = await fetch("https://api.openai.com/v1/chat/completions", {
+  const r = await fetch(LLM_URL(), {
     method: "POST",
-    headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, "Content-Type": "application/json" },
+    headers: { Authorization: `Bearer ${process.env.LLM_API_KEY}`, "Content-Type": "application/json" },
     body: JSON.stringify({
       model: MODEL(),
-      reasoning_effort: "minimal", // reasoning tokens are billed as output; a support reply needs none
-      max_completion_tokens: 700,
-      response_format: { type: "json_object" },
+      max_tokens: 1500, // headroom: a reasoning model spends part of this thinking before it answers
+      temperature: 0.3,
       messages: [
         { role: "system", content: SYSTEM },
-        { role: "user", content: `${code.map((c) => `<app_code path="${c.path}">\n${c.body}\n</app_code>`).join("\n")}\n${pages.map((p) => `<guide_page title="${p.title}">\n${p.body.slice(0, 5000)}\n</guide_page>`).join("\n")}\nSubject: ${subject}\n\n<customer_email>\n${body}\n</customer_email>` },
+        { role: "user", content: `${code.map((c) => `<app_code path="${c.path}">\n${c.body}\n</app_code>`).join("\n")}\n${pages.map((p) => `<guide_page title="${p.title}">\n${p.body.slice(0, 4000)}\n</guide_page>`).join("\n")}\nSubject: ${maskPersonal(subject)}\n\n<customer_email>\n${maskPersonal(body)}\n</customer_email>` },
       ],
     }),
   });
-  if (!r.ok) throw new Error("OpenAI " + r.status);
-  const j = JSON.parse((await r.json()).choices?.[0]?.message?.content || "{}");
+  if (!r.ok) throw new Error("LLM " + r.status);
+  // Open models sometimes wrap the JSON in prose or code fences: take the first {...}. Anything unparseable escalates to Toby.
+  const content = (await r.json()).choices?.[0]?.message?.content || "";
+  let j = {};
+  try { j = JSON.parse(/\{[\s\S]*\}/.exec(content)?.[0] || "{}"); } catch { /* escalate below */ }
   return { reply: String(j.reply || "").trim(), links: Array.isArray(j.links) ? j.links.filter((k) => LINKS[k]) : [], escalate: j.escalate === true || !j.reply };
 }
 
@@ -214,7 +221,8 @@ export default async function handler(req, res) {
     const links = { ...LINKS, ...(pages[0] && { guide: [`Guide: ${pages[0].title}`, pages[0].url] }) };
     const linkText = d.links.map((k) => `${links[k][0]}: ${links[k][1]}`).join("\n");
     // Strip any URL the model wrote itself that isn't one of ours.
-    const safe = d.reply.replace(/https?:\/\/\S+/g, (u) => (Object.values(links).some(([, l]) => u.startsWith(l)) ? u : ""));
+    const holding = "Thanks for getting in touch. I've passed your message to Toby, who will look at it personally and reply as soon as he can.";
+    const safe = (d.reply || holding).replace(/https?:\/\/\S+/g, (u) => (Object.values(links).some(([, l]) => u.startsWith(l)) ? u : ""));
     const text = [safe, linkText, "Maestro Pro Support\n(This reply was written by an AI assistant. If you need a person, just reply to this email and Toby will read it.)"].filter(Boolean).join("\n\n");
 
     const r = await send({
