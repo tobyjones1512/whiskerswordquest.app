@@ -7,11 +7,14 @@
 //   day 15+   no refund. Annual: cancel the subscription and the mandate; access runs to the end of the year paid for.
 //             Monthly: charge 1 month + 50% of the rest of the 12-month term through the mandate (amounts taken from the
 //             bills on GoCardless), then cancel subscriptions and instalments but KEEP the mandate.
+// Retention plan: Professional at £5/month, rolling (monthly subscription of RETENTION_PENCE with no count or end date).
+// Offered after a refund. It has no refund window, no 14-day wait and no fee: cancelling stops it straight away.
 // Needs GOCARDLESS_ACCESS_TOKEN, LICENCE_SECRET, RESEND_API_KEY. GoCardless refunds must be enabled on the account.
 import { gc, parseStudentKey } from "./_gc.js";
 
 const ORIGINS = ["https://maestro-pro.app", "https://www.maestro-pro.app", "https://thecaffeinemediacompany.com", "https://www.thecaffeinemediacompany.com"];
 const TERM_MONTHS = 12;
+const RETENTION_PENCE = 500;
 const DAY = 864e5;
 const BAD = ["failed", "cancelled", "customer_approval_denied", "charged_back"];
 const NOT_COLLECTED = ["pending_customer_approval", "pending_submission"]; // can still be cancelled
@@ -64,6 +67,13 @@ async function assess(customerId, now = Date.now()) {
   if (!valid.length && !activeSubs.length && !activeScheds.length && !activeMandates.length) throw fail(404, "We can't find a Maestro Pro payment or plan for that licence key.");
   if (!activeSubs.length && !activeScheds.length && !pending.length && !activeMandates.length) return { ...base, outcome: "already_cancelled" };
 
+  // The rolling £5 plan cancels at once, free, whatever day it is.
+  if (activeSubs.length && activeSubs.every((s) => s.interval_unit === "monthly" && s.amount === RETENTION_PENCE && !s.count && !s.end_date)) {
+    const last = valid.filter((p) => IN_FLIGHT.includes(p.status)).pop();
+    const paidTo = last ? addMonths(Date.parse(last.charge_date), 1) : 0;
+    return { ...base, monthly: true, outcome: "cancel_rolling", fee: 0, refund: 0, accessUntil: Math.max(midnight(now), midnight(paidTo)) };
+  }
+
   const monthly =
     activeSubs.some((s) => s.interval_unit === "monthly" && (s.interval ?? 1) === 1) ||
     scheds.some((s) => {
@@ -108,6 +118,7 @@ const describe = (a) => {
     case "too_early": return `Your first payment was taken on ${dateStr(a.start)}. Refunds can only be issued once a payment has cleared, which takes up to a week. Please try again on ${dateStr(a.retryOn)}, the 8th day after your payment, and we will refund it then.`;
     case "not_cleared": return "Your payment is still on its way through the banks, so it can't be refunded yet. Please try again tomorrow.";
     case "refund": return `You are within the 14-day guarantee. We will refund ${gbp(a.refund)} to your bank account and cancel your licence, including any subscription, instalments and Direct Debit mandate. Your key will stop working today.`;
+    case "cancel_rolling": return `This is the rolling £5 a month plan, so there is no cancellation fee and no waiting period. We will cancel it and its Direct Debit now. Your licence key will keep working until ${dateStr(a.accessUntil)}, the end of the month you have paid for.`;
     case "cancel": return a.monthly || !a.valid.length ? "We will cancel your licence." : `The 14-day refund period has ended (it ran for 14 days from ${dateStr(a.start)}), so we can't refund this payment. We can stop it renewing: we will cancel your subscription and Direct Debit mandate, and your licence key will keep working until ${dateStr(a.accessUntil)}, the end of the year you paid for.`;
     case "fee": return `The 14-day refund period has ended, so we can't refund your payments. We can cancel your subscription going forward. Because you pay monthly on a ${TERM_MONTHS}-month contract, ending it early costs one month plus half of the remaining term: ${gbp(a.fee)}. We will collect it from your bank by Direct Debit, using the mandate you already have, then cancel your remaining payments. Your Direct Debit mandate stays in place. Your key will keep working until ${dateStr(a.accessUntil)}.`;
   }
@@ -183,14 +194,15 @@ export default async function handler(req, res) {
   try {
     const a = await assess(customerId);
     const view = { outcome: a.outcome, message: describe(a), refund: a.refund || 0, fee: a.fee || 0, retryOn: a.retryOn ? dateStr(a.retryOn) : undefined };
-    if (action === "check") return res.status(200).json({ ok: true, ...view, canConfirm: ["refund", "cancel", "fee"].includes(a.outcome) });
+    if (action === "check") return res.status(200).json({ ok: true, ...view, canConfirm: ["refund", "cancel", "cancel_rolling", "fee"].includes(a.outcome) });
 
-    if (!["refund", "cancel", "fee"].includes(a.outcome)) return res.status(200).json({ ok: true, done: false, ...view });
+    if (!["refund", "cancel", "cancel_rolling", "fee"].includes(a.outcome)) return res.status(200).json({ ok: true, done: false, ...view });
     // Refuse if the amounts moved since the customer read them (a day boundary, a new payment).
     if (Number(refund || 0) !== view.refund || Number(fee || 0) !== view.fee) return res.status(409).json({ error: "Your account changed while you were reading this. Please start again." });
     await execute(a, customerId);
     const msg = a.outcome === "refund" ? `We have refunded ${gbp(a.refund)}, which should reach your bank in a few working days, and cancelled your licence.`
       : a.outcome === "fee" ? `We have collected the ${gbp(a.fee)} cancellation fee and cancelled your remaining monthly payments. Your licence key will work until ${dateStr(a.accessUntil)}.`
+      : a.outcome === "cancel_rolling" ? `Your £5 a month plan and its Direct Debit are cancelled, with no fee. Your licence key will work until ${dateStr(a.accessUntil)}.`
       : a.monthly ? "Your licence has been cancelled." : `Your subscription and Direct Debit mandate are cancelled. Your licence key will work until ${dateStr(a.accessUntil)}.`;
     await notify(a, msg);
     res.status(200).json({ ok: true, done: true, outcome: a.outcome, message: msg });
