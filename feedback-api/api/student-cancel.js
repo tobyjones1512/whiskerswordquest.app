@@ -187,11 +187,15 @@ async function execute(a, customerId, now = Date.now()) {
   await gc("PUT", `/customers/${customerId}`, { customers: { metadata: { ...(a.customer.metadata || {}), maestro_access_until: new Date(a.accessUntil).toISOString() } } });
 }
 
+const planTitles = (a) => {
+  const named = [...a.activeSubs, ...a.activeScheds].map((x) => x.name);
+  return [...new Set((named.length ? named : a.valid.map((p) => p.description)).filter(Boolean))].join(", ") || "Maestro Pro";
+};
+
 /** Tells Toby why someone cancelled, which plan they were on and what was done. Never fails the cancellation. */
 async function tellOwner(a, key, reason, result) {
   if (!process.env.RESEND_API_KEY) return;
-  const named = [...a.activeSubs, ...a.activeScheds].map((x) => x.name);
-  const plans = [...new Set((named.length ? named : a.valid.map((p) => p.description)).filter(Boolean))].join(", ") || "Unknown";
+  const plans = planTitles(a);
   const email = a.customer?.email || "unknown";
   const lines = [`Plan: ${plans}`, `Customer email: ${email}`, `Licence key: ${key}`, `Outcome: ${result}`, "", "Their reason:", String(reason).trim()];
   await fetch("https://api.resend.com/emails", {
@@ -208,19 +212,32 @@ async function tellOwner(a, key, reason, result) {
   }).catch(() => {});
 }
 
-async function notify(a, summary) {
-  const to = a.customer?.email;
+/** The customer's confirmation: that the licence is cancelled, any refund or fee, and the last day the key works.
+ *  Test keys send it to the owner instead, marked as a test. */
+async function sendConfirmation(a, test) {
+  const customerEmail = a.customer?.email;
+  const to = test ? OWNER : customerEmail;
   if (!to || !process.env.RESEND_API_KEY) return;
-  const note = "This inbox is not monitored, so please do not reply to this email.";
+  const plan = planTitles(a);
+  const refunded = a.outcome === "refund";
+  const lines = [
+    `Your Maestro Pro licence (${plan}) has been cancelled.`,
+    refunded ? `Refund: ${gbp(a.refund)}. It should reach your bank account in a few working days.` : "Refund: none.",
+    a.fee ? `Cancellation fee charged: ${gbp(a.fee)}.` : "Cancellation fee charged: none. No fees were taken for this cancellation.",
+    refunded ? `Last day you can use your licence: ${dateStr(a.accessUntil)}. Your licence key stopped working today.` : `Last day you can use your licence: ${dateStr(a.accessUntil)}.`,
+    "No further payments will be taken.",
+  ];
+  const note = "If you didn't ask for this, email hello@thecaffeinemediacompany.com. This inbox is not monitored, so please do not reply to this email.";
+  const testNote = test ? `This is a test: no real customer was cancelled. It was sent to you instead of ${customerEmail || "the customer"}.` : "";
   await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}`, "Content-Type": "application/json" },
     body: JSON.stringify({
       from: process.env.CONTACT_FROM || "Maestro Pro <noreply@thecaffeinemediacompany.com>",
       to: [to],
-      subject: "Your Maestro Pro licence has been cancelled",
-      text: `${summary}\n\nIf you didn't ask for this, email hello@thecaffeinemediacompany.com.\n\n${note}`,
-      html: `<p>${summary}</p><p>If you didn't ask for this, email hello@thecaffeinemediacompany.com.</p><p>${note}</p>`,
+      subject: `${test ? "[TEST] " : ""}Your Maestro Pro licence has been cancelled`,
+      text: [testNote, ...lines, "", note].filter((l, i) => l || i).join("\n"),
+      html: [testNote && `<p><i>${esc(testNote)}</i></p>`, ...lines.map((l) => `<p>${esc(l)}</p>`), `<p>${esc(note)}</p>`].filter(Boolean).join(""),
     }),
   }).catch(() => {});
 }
@@ -237,27 +254,32 @@ export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "POST only." });
   if (!ORIGINS.includes(origin)) return res.status(403).json({ error: "Not allowed." });
 
-  const { key, action, refund, fee, reason } = req.body || {};
+  const { key, action, refund, fee, reason, skipReason } = req.body || {};
   const customerId = testKey(key) || parseStudentKey(key);
   if (!customerId) return res.status(400).json({ error: "That licence key isn't valid. Check it and try again." });
   if (action !== "check" && action !== "confirm") return res.status(400).json({ error: "Unknown action." });
 
   try {
     const a = await assess(customerId);
+    const test = !!TEST_WORLDS[customerId];
+    // Only people in the UK (Vercel's country header) may skip the reason. Test keys may, so the button can be tried anywhere.
+    const uk = test || req.headers["x-vercel-ip-country"] === "GB";
     const view = { outcome: a.outcome, message: describe(a), refund: a.refund || 0, fee: a.fee || 0, retryOn: a.retryOn ? dateStr(a.retryOn) : undefined };
-    if (action === "check") return res.status(200).json({ ok: true, ...view, canConfirm: ["refund", "cancel", "cancel_rolling", "fee"].includes(a.outcome) });
+    if (action === "check") return res.status(200).json({ ok: true, ...view, canConfirm: ["refund", "cancel", "cancel_rolling", "fee"].includes(a.outcome), canSkipReason: uk });
 
     if (!["refund", "cancel", "cancel_rolling", "fee"].includes(a.outcome)) return res.status(200).json({ ok: true, done: false, ...view });
-    // A reason of at least MIN_WORDS words is required before anything is refunded, charged or cancelled.
-    if (wordCount(reason) < MIN_WORDS || String(reason).length > 3000) return res.status(400).json({ error: `Please tell us why you're cancelling, in at least ${MIN_WORDS} words.` });
+    // A reason of at least MIN_WORDS words is required before anything is refunded, charged or cancelled, unless a UK customer chose to skip it.
+    const skip = skipReason === true && uk;
+    if (!skip && wordCount(reason) < MIN_WORDS || String(reason).length > 3000) return res.status(400).json({ error: `Please tell us why you're cancelling, in at least ${MIN_WORDS} words.` });
     // Refuse if the amounts moved since the customer read them (a day boundary, a new payment).
     if (Number(refund || 0) !== view.refund || Number(fee || 0) !== view.fee) return res.status(409).json({ error: "Your account changed while you were reading this. Please start again." });
-    if (!TEST_WORLDS[customerId]) await execute(a, customerId); // test keys change nothing
+    if (!test) await execute(a, customerId); // test keys change nothing
     const msg = a.outcome === "refund" ? `We have refunded ${gbp(a.refund)}, which should reach your bank in a few working days, and cancelled your licence.`
       : a.outcome === "fee" ? `We have collected the ${gbp(a.fee)} cancellation fee and cancelled your remaining monthly payments. Your licence key will work until ${dateStr(a.accessUntil)}.`
       : a.outcome === "cancel_rolling" ? `Your £5 a month plan is cancelled, with no fee. Your licence key will work until ${dateStr(a.accessUntil)}.`
       : a.monthly ? "Your licence has been cancelled." : `Your subscription is cancelled and nothing more will be taken. Your licence key will work until ${dateStr(a.accessUntil)}.`;
-    if (!TEST_WORLDS[customerId]) { await notify(a, msg); await tellOwner(a, String(key).trim().toUpperCase(), reason, msg); }
+    await sendConfirmation(a, test);
+    if (!test) await tellOwner(a, String(key).trim().toUpperCase(), skip ? "(The customer chose not to give a reason.)" : reason, msg);
     // The retention offer is only ever sent to someone who has just been refunded, never published on the site.
     const offer = a.outcome === "refund" ? { title: "Before you go: Professional for £5 a month.", text: "Keep every Professional feature, including the score editor and version history, for half the usual monthly price. It rolls month to month, and you can cancel any time with no fee and no waiting period.", cta: "Keep Professional for £5 a month", url: RETENTION_URL } : undefined;
     res.status(200).json({ ok: true, done: true, outcome: a.outcome, message: msg, offer });
