@@ -125,10 +125,15 @@ export default async function handler(req, res) {
 
     if (b.action === "seed-test-data") {
       // A made-up customer, an escalated refund chain and a spread of account activity, so the activity log can be tried without a real customer.
-      const entries = await seedActivity();
-      const t = await recordMessage({ customer: TEST_EMAIL, name: "Test Customer", subject: "Refund has not arrived", message: { key: "seed-test-1", dir: "in", by: "customer", text: "Hi, I asked for a refund last week and it still has not arrived. I also removed my old iPad from the licence. Please can you check what is going on?" }, escalate: { reason: "Refund problem (test data)" } });
-      if (t.status !== "open") { t.status = "open"; t.updatedAt = new Date().toISOString(); await saveThread(t); }
-      return res.status(200).json({ ok: true, entries, id: t.id });
+      try {
+        const entries = await seedActivity();
+        const t = await recordMessage({ customer: TEST_EMAIL, name: "Test Customer", subject: "Refund has not arrived", message: { key: "seed-test-1", dir: "in", by: "customer", text: "Hi, I asked for a refund last week and it still has not arrived. I also removed my old iPad from the licence. Please can you check what is going on?" }, escalate: { reason: "Refund problem (test data)" } });
+        if (t.status !== "open") { t.status = "open"; t.updatedAt = new Date().toISOString(); await saveThread(t); }
+        return res.status(200).json({ ok: true, entries, id: t.id });
+      } catch (e) {
+        console.error("seed-test-data", e);
+        return res.status(500).json({ error: `Test data failed: ${String(e?.message || e).slice(0, 200)}` });
+      }
     }
 
     const thread = await loadThread(b.id);

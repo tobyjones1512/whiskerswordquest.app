@@ -3,7 +3,7 @@
 // One small JSON file per email in the Blob store, named by a hash of the address (the address itself is not in the file name) and the
 // licence key is stored only as its last 6 characters. Logging must never break the thing being logged: logActivity swallows every error.
 import crypto from "node:crypto";
-import { readVersioned, writeVersioned, storeReady } from "./_threads.js";
+import { readVersioned, writeVersioned, writeRaw, storeReady } from "./_threads.js";
 
 const MAX = 200;   // entries kept per email, oldest dropped first
 export const normEmail = (e) => String(e ?? "").trim().toLowerCase();
@@ -50,9 +50,6 @@ export async function seedActivity(now = Date.now()) {
     { at: ago(6), type: "refund", status: "failed", summary: "Refund of £89.00 attempted but failed, nothing cancelled", detail: "GoCardless refused the refund. The customer was asked to email for it to be done by hand.", key: "MPS-CUTEST-AAAAAAAAAA", amount: 8900 },
     { at: ago(2), type: "refund", status: "completed", summary: "Refunded £89.00 and cancelled the licence", detail: "Reason given: I bought it by mistake and do not need a score editor, sorry for the trouble.", key: "MPS-CUTEST-AAAAAAAAAA", amount: 8900 },
   ];
-  for (let i = 0; i < 6; i++) {
-    const { etag } = await readVersioned(FILE(TEST_EMAIL));
-    if (await writeVersioned(FILE(TEST_EMAIL), { email: TEST_EMAIL, entries }, etag)) return entries.length;
-  }
-  throw new Error("The test log was busy.");
+  await writeRaw(FILE(TEST_EMAIL), { email: TEST_EMAIL, entries });
+  return entries.length;
 }
