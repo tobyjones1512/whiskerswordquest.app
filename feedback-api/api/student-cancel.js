@@ -147,10 +147,10 @@ const describe = (a) => {
     case "already_cancelled": return "This licence has already been cancelled. There is nothing left to cancel.";
     case "too_early": return `Your first payment was taken on ${dateStr(a.start)}. Refunds can only be issued once a payment has cleared, which takes up to a week. Please try again on ${dateStr(a.retryOn)}, the 8th day after your payment, and we will refund it then.`;
     case "not_cleared": return "Your payment is still on its way through the banks, so it can't be refunded yet. Please try again tomorrow.";
-    case "refund": return `You are within the 14-day guarantee. We will refund ${gbp(a.refund)} to your bank account and cancel your licence, including any subscription, instalments and Direct Debit mandate. Your key will stop working today.`;
-    case "cancel_rolling": return `This is the rolling £5 a month plan, so there is no cancellation fee and no waiting period. We will cancel it and its Direct Debit now. Your licence key will keep working until ${dateStr(a.accessUntil)}, the end of the month you have paid for.`;
-    case "cancel": return a.monthly || !a.valid.length ? "We will cancel your licence." : `The 14-day refund period has ended (it ran for 14 days from ${dateStr(a.start)}), so we can't refund this payment. We can stop it renewing: we will cancel your subscription and Direct Debit mandate, and your licence key will keep working until ${dateStr(a.accessUntil)}, the end of the year you paid for.`;
-    case "fee": return `The 14-day refund period has ended, so we can't refund your payments. We can cancel your subscription going forward. Because you pay monthly on a ${TERM_MONTHS}-month contract, ending it early costs one month plus half of the remaining term: ${gbp(a.fee)}. We will collect it from your bank by Direct Debit, using the mandate you already have, then cancel your remaining payments. Your Direct Debit mandate stays in place. Your key will keep working until ${dateStr(a.accessUntil)}.`;
+    case "refund": return `You are within the 14-day guarantee. We will refund ${gbp(a.refund)} to your bank account and cancel your licence and any future payments. Your key will stop working today.`;
+    case "cancel_rolling": return `This is the rolling £5 a month plan, so there is no cancellation fee and no waiting period. We will cancel it now. Your licence key will keep working until ${dateStr(a.accessUntil)}, the end of the month you have paid for.`;
+    case "cancel": return a.monthly || !a.valid.length ? "We will cancel your licence." : `The 14-day refund period has ended (it ran for 14 days from ${dateStr(a.start)}), so we can't refund this payment. We can stop it renewing: we will cancel your subscription so nothing more is taken, and your licence key will keep working until ${dateStr(a.accessUntil)}, the end of the year you paid for.`;
+    case "fee": return `The 14-day refund period has ended, so we can't refund your payments. We can cancel your subscription going forward. Because you pay monthly on a ${TERM_MONTHS}-month contract, ending it early costs one month plus half of the remaining term: ${gbp(a.fee)}. We will collect it from your bank account using the payment details you already gave us, then cancel your remaining payments. Your key will keep working until ${dateStr(a.accessUntil)}.`;
   }
 };
 
@@ -168,7 +168,7 @@ async function execute(a, customerId, now = Date.now()) {
     }
   } else if (a.outcome === "fee") {
     const mandate = [...a.activeSubs, ...a.activeScheds].map((x) => x.links?.mandate).find((m) => a.activeMandates.some((am) => am.id === m)) || a.activeMandates[0]?.id;
-    if (!mandate) throw fail(409, "We couldn't find an active Direct Debit mandate to collect the cancellation fee. Please email hello@thecaffeinemediacompany.com.");
+    if (!mandate) throw fail(409, "We couldn't find your payment details to collect the cancellation fee, so nothing has been cancelled. Please email hello@thecaffeinemediacompany.com.");
     const r = await post("/payments", { payments: { amount: a.fee, currency: "GBP", description: "Maestro Pro early cancellation fee", links: { mandate }, metadata: { cancellation_fee: "true" } } },
       `${idemBase}-fee-${[...a.activeSubs, ...a.activeScheds].map((x) => x.id).join("-")}`);
     if (r.status >= 300 && !conflict(r)) throw fail(502, "We couldn't collect the cancellation fee, so nothing has been cancelled. Please email hello@thecaffeinemediacompany.com.");
@@ -255,8 +255,8 @@ export default async function handler(req, res) {
     if (!TEST_WORLDS[customerId]) await execute(a, customerId); // test keys change nothing
     const msg = a.outcome === "refund" ? `We have refunded ${gbp(a.refund)}, which should reach your bank in a few working days, and cancelled your licence.`
       : a.outcome === "fee" ? `We have collected the ${gbp(a.fee)} cancellation fee and cancelled your remaining monthly payments. Your licence key will work until ${dateStr(a.accessUntil)}.`
-      : a.outcome === "cancel_rolling" ? `Your £5 a month plan and its Direct Debit are cancelled, with no fee. Your licence key will work until ${dateStr(a.accessUntil)}.`
-      : a.monthly ? "Your licence has been cancelled." : `Your subscription and Direct Debit mandate are cancelled. Your licence key will work until ${dateStr(a.accessUntil)}.`;
+      : a.outcome === "cancel_rolling" ? `Your £5 a month plan is cancelled, with no fee. Your licence key will work until ${dateStr(a.accessUntil)}.`
+      : a.monthly ? "Your licence has been cancelled." : `Your subscription is cancelled and nothing more will be taken. Your licence key will work until ${dateStr(a.accessUntil)}.`;
     if (!TEST_WORLDS[customerId]) { await notify(a, msg); await tellOwner(a, String(key).trim().toUpperCase(), reason, msg); }
     // The retention offer is only ever sent to someone who has just been refunded, never published on the site.
     const offer = a.outcome === "refund" ? { title: "Before you go: Professional for £5 a month.", text: "Keep every Professional feature, including the score editor and version history, for half the usual monthly price. It rolls month to month, and you can cancel any time with no fee and no waiting period.", cta: "Keep Professional for £5 a month", url: RETENTION_URL } : undefined;
