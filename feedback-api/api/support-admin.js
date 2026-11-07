@@ -50,6 +50,22 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, thread });
     }
 
+    if (b.action === "escalate") {
+      // Take a chain over by hand. A bot reply still waiting out its delay is cancelled at Resend and marked deleted, so the customer never gets it.
+      const waiting = thread.messages.filter((m) => m.by === "bot" && m.resendId && m.scheduledAt && !m.cancelled && Date.parse(m.scheduledAt) > Date.now());
+      let deleted = 0;
+      for (const m of waiting) {
+        const c = await fetch(`https://api.resend.com/emails/${encodeURIComponent(m.resendId)}/cancel`, { method: "POST", headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}` } });
+        if (c.ok) { m.cancelled = true; deleted++; }
+        else return res.status(409).json({ error: "That reply could not be cancelled, it may just have been sent. Refresh and check." });
+      }
+      const now = new Date().toISOString();
+      if (!thread.escalated) { thread.escalated = true; thread.escalatedAt = now; thread.reason = "Escalated by you"; }
+      thread.status = "open"; thread.updatedAt = now;
+      await saveThread(thread);
+      return res.status(200).json({ ok: true, deleted, thread });
+    }
+
     if (b.action === "reply") {
       const text = String(b.text || "").replace(/\r\n/g, "\n").trim();
       if (!text) return res.status(400).json({ error: "Write a reply first." });

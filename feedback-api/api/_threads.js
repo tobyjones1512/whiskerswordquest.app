@@ -36,7 +36,8 @@ const readJson = (path) => store.read(path), writeJson = (path, data) => store.w
 const clip = (t, n) => String(t ?? "").replace(/\s+/g, " ").trim().slice(0, n);
 export function summary(t) {
   const last = t.messages[t.messages.length - 1] || {};
-  return { id: t.id, customer: t.customer, name: t.name || null, subject: t.subject, escalated: !!t.escalated, escalatedAt: t.escalatedAt || null, reason: t.reason || null, status: t.status, createdAt: t.createdAt, updatedAt: t.updatedAt, count: t.messages.length, preview: clip(last.text, 140), lastBy: last.by || null };
+  const waiting = t.messages.filter((m) => m.scheduledAt && !m.cancelled).map((m) => m.scheduledAt).sort().pop() || null;   // latest reply that has a send time and was not deleted
+  return { scheduledAt: waiting, id: t.id, customer: t.customer, name: t.name || null, subject: t.subject, escalated: !!t.escalated, escalatedAt: t.escalatedAt || null, reason: t.reason || null, status: t.status, createdAt: t.createdAt, updatedAt: t.updatedAt, count: t.messages.length, preview: clip(last.text, 140), lastBy: last.by || null };
 }
 
 export const loadThread = (id) => (/^[a-f0-9]{16}$/.test(String(id)) ? readJson(THREAD(id)) : null);

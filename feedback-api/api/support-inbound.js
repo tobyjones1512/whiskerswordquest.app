@@ -321,7 +321,7 @@ export function buildEmail({ name, reply, buttons = [], guides = [], aiNotice = 
 ${body}${buttonsHtml}${guidesHtml}
 <p class="ink" style="margin:26px 0 0;font:16px/1.5 ${FONT};color:${C.ink}">Best regards,<br><strong>Maestro Pro Support</strong></p>
 </td></tr>
-<tr><td class="foot" style="background:${C.foot};border-radius:0 0 14px 14px;padding:18px 34px;font:12px/1.5 ${FONT};color:#7A6E5B">Maestro Pro, made by Toby Jones &middot; <a href="https://maestro-pro.app/" style="color:#7A6E5B">maestro-pro.app</a> &middot; <a href="mailto:${contact}" style="color:#7A6E5B">${contact}</a>${aiNotice ? `<div style="margin-top:8px;font-size:10px;line-height:1.3;color:#8A8070">${AI_NOTICE}</div>` : ""}</td></tr>
+<tr><td class="foot" style="background:${C.foot};border-radius:0 0 14px 14px;padding:18px 34px;font:12px/1.5 ${FONT};color:#7A6E5B">Maestro Pro, made by <a href="https://thecaffeinemediacompany.com" style="color:#7A6E5B">Toby Jones</a> &middot; <a href="https://maestro-pro.app/" style="color:#7A6E5B">maestro-pro.app</a> &middot; <a href="mailto:${contact}" style="color:#7A6E5B">${contact}</a>${aiNotice ? `<div style="margin-top:8px;font-size:10px;line-height:1.3;color:#8A8070">${AI_NOTICE}</div>` : ""}</td></tr>
 </table></td></tr></table></body></html>`;
   // ----- plain text
   const parts = [hi, ...blocks.map((b) => (b.type === "steps" ? b.items.map((l, i) => `${i + 1}. ${text(l)}`).join("\n") : b.type === "bullets" ? b.items.map((l) => `- ${text(l)}`).join("\n") : b.items.map(text).join("\n"))),
@@ -536,20 +536,22 @@ export default async function handler(req, res) {
     const inlineReply = escalate ? safe : autoLink(relinkInline(safe), [...d.links.map((k) => ({ target: k, anchors: LINK_ANCHORS[k] || [] })), ...pagePairs.map((g) => ({ target: g.slug, anchors: [g.title, g.title.replace(/\s+guide$/i, "")] }))]);
     const { text, html } = buildEmail({ name, reply: inlineReply, buttons, guides: guideCards, aiNotice, resolve });
 
+    const scheduledAt = process.env.REPLY_DELAY === "on" ? replyTime() : undefined;
     const r = await send({
       from: FROM(), to: [addr(from)], reply_to: escalate ? ESCALATIONS : SUPPORT,   // once escalated, the customer's next email goes to the desk
       subject: /^re:/i.test(subject) ? subject : `Re: ${subject}`,
       text, html,
-      ...(process.env.REPLY_DELAY === "on" && { scheduled_at: replyTime() }),   // off for now; set REPLY_DELAY=on for a 10 to 45 minute pause
+      ...(scheduledAt && { scheduled_at: scheduledAt }),   // off for now; set REPLY_DELAY=on for a 10 to 45 minute pause
       ...(msgId && { headers: { "In-Reply-To": msgId, References: msgId } }),
     }, `support-reply-${id}`);
     if (!r.ok) throw new Error("Resend " + r.status);
+    const resendId = (await r.json().catch(() => ({})))?.id;   // lets the desk cancel a reply that is still waiting out its delay
 
     // Keep the chain for the desk (the page at /escalations/). A storage problem must never stop the reply or the escalation notice.
     const at = new Date().toISOString(), tid = threadId(addr(from), subject);
     try {
       await recordMessage({ customer: addr(from), name, subject, message: { key: id, dir: "in", by: "customer", at, text: body, msgId } });
-      await recordMessage({ customer: addr(from), name, subject, message: { key: `bot-${id}`, dir: "out", by: "bot", at: new Date().toISOString(), text }, escalate: escalate ? { reason: verdict.reason } : undefined });
+      await recordMessage({ customer: addr(from), name, subject, message: { key: `bot-${id}`, dir: "out", by: "bot", at: new Date().toISOString(), text, ...(scheduledAt && { scheduledAt, resendId }) }, escalate: escalate ? { reason: verdict.reason } : undefined });
     } catch (e) { console.error("thread store", e?.message); }
 
     if (escalate) {
