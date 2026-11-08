@@ -116,7 +116,10 @@ export default async function handler(req, res) {
       // A sample of the licence key email (with a sample key that works nowhere), so its look can be checked in a real inbox.
       const to = String(b.to ?? "").trim().toLowerCase();
       if (!/^[^\s@<>,;]+@[^\s@<>,;]+\.[^\s@<>,;]+$/.test(to) || to.length > 200) return res.status(400).json({ error: "Enter a valid email address." });
-      const mail = buildKeyEmail([{ key: "MPS-SAMPLE-0000-0000", plans: ["Maestro Pro Professional"] }]);
+      // `real: true` sends the Professional testing key (TEST_PRO_KEY on Vercel), which the app accepts in every build.
+      const testKey = process.env.TEST_PRO_KEY;
+      if (b.real === true && !testKey) return res.status(400).json({ error: "TEST_PRO_KEY is not set on the feedback-api project in Vercel, so there is no testing key to send." });
+      const mail = buildKeyEmail([b.real === true ? { key: testKey, plans: ["Maestro Pro Professional (testing)"] } : { key: "MPS-SAMPLE-0000-0000", plans: ["Maestro Pro Professional"] }]);
       const r = await send({ from: KEY_FROM(), to: [to], subject: `[Test] ${KEY_SUBJECT}`, text: mail.text, html: mail.html }, `keytest-${crypto.randomUUID()}`);
       const out = await r.json().catch(() => ({}));
       if (!r.ok) return res.status(502).json({ error: `The test email could not be sent: ${String(out.message || out.error || "Resend " + r.status).slice(0, 200)}` });
