@@ -1,1 +1,0 @@
-{ "name": "wwq-feedback-api", "private": true, "dependencies": { "@vercel/blob": "2.8.2" } }

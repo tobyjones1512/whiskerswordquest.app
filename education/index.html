@@ -13,9 +13,6 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Nunito:wght@700;800;900&display=swap">
 <link rel="stylesheet" href="/css/site.css">
 <style>
-  dialog { border: 0; border-radius: 24px; padding: 24px; width: min(480px, calc(100% - 32px)); box-shadow: 0 10px 0 rgba(31,42,68,.15), 0 0 0 4px var(--line); }
-  dialog::backdrop { background: rgba(31,42,68,.5); }
-  .hp { position: absolute; left: -9999px; }
 
   .game-row { display: grid; grid-template-columns: 84px 1fr; gap: 18px; align-items: start; }
   .game-row .badge { width: 84px; height: 84px; border-radius: 22px; display: grid; place-items: center; color: #fff; font-weight: 900; font-size: 24px; line-height: .95; white-space: pre-line; text-align: center; box-shadow: 0 5px 0 rgba(0,0,0,.18); text-shadow: 0 2px 0 rgba(0,0,0,.2); }
@@ -49,7 +46,7 @@
       <div class="btns" style="margin-top:22px">
         <a class="btn mint" href="/education/create/">Create a Task</a>
         <a class="btn white" href="#games">Games and benefits</a>
-        <button class="btn sunny" type="button" id="contact-open">Get In Touch</button>
+        <a class="btn sunny" href="mailto:hello@thecaffeinemediacompany.com?subject=Whiskers%27%20Word%20Quest%20enquiry">Get In Touch</a>
       </div>
       <p style="margin-top:22px"><a class="tf-btn" href="/testflight/"><img src="/img/testflight-icon.png" alt="" width="34" height="34"><span><small>Join the Pre-Alpha on</small>TestFlight</span></a></p>
     </div>
@@ -126,17 +123,6 @@
   </div></div></section>
 </main>
 
-<dialog id="contact">
-  <form id="cf" method="dialog">
-    <h2 style="margin-top:0">Get In Touch</h2>
-    <div class="field"><label for="c-name">Your name</label><input type="text" id="c-name" maxlength="100" required autocomplete="name"></div>
-    <div class="field"><label for="c-email">Your email</label><input type="email" id="c-email" maxlength="200" required autocomplete="email"><span class="hint">We reply to this address and send you a copy.</span></div>
-    <div class="field"><label for="c-msg">Message</label><textarea id="c-msg" maxlength="5000" required></textarea></div>
-    <input class="hp" type="text" id="c-website" tabindex="-1" autocomplete="off" aria-hidden="true">
-    <div class="btns"><button class="btn mint" id="c-send" type="submit">Send</button><button class="btn white" type="button" id="c-close">Close</button></div>
-    <p id="c-status" role="status"></p>
-  </form>
-</dialog>
 <div class="hills" aria-hidden="true"><svg viewBox="0 0 1440 160" preserveAspectRatio="none"><path fill="#8EE08A" d="M0 70C300 0 520 10 760 60s480 60 680-20v120H0z"/><path fill="#5CCB78" d="M0 120c240-50 520-60 820-10s460 20 620-10v60H0z"/></svg></div>
 <footer>
   <div class="wrap">
@@ -168,24 +154,6 @@
     s.textContent = `${e.flag} ${e.name}`;
     flags.append(s);
   }
-  const dlg = document.getElementById("contact"), $ = (id) => document.getElementById(id);
-  $("contact-open").onclick = () => dlg.showModal();
-  $("c-close").onclick = () => dlg.close();
-  $("cf").addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const st = $("c-status"), btn = $("c-send");
-    btn.disabled = true; st.className = ""; st.textContent = "Sending…";
-    try {
-      const r = await fetch("https://fider-feedback-api.vercel.app/api/contact", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: $("c-name").value, email: $("c-email").value, message: $("c-msg").value, website: $("c-website").value }),
-      });
-      const j = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(j.error || "Couldn't send your message.");
-      $("cf").reset(); st.textContent = "Thanks! Your message is sent and a copy is on its way to you.";
-    } catch (err) { st.className = "err"; st.textContent = err.message; }
-    btn.disabled = false;
-  });
 </script>
 </body>
 </html>
